@@ -34,13 +34,6 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
         DrawTargets(serializedObject.FindProperty("targets"));
 
-        EditorGUILayout.Space();
-        if (GUILayout.Button("Apply Trim Now"))
-        {
-            MeshTrimProcessor.ApplyTrim((NDMFVRoidMeshTrimmer)target);
-            TexturePostProcessProcessor.ApplyBuildTimeReplacement((NDMFVRoidMeshTrimmer)target);
-        }
-
         serializedObject.ApplyModifiedProperties();
     }
 
