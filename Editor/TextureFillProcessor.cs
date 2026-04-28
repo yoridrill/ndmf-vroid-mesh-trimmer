@@ -88,11 +88,6 @@ public static class TexturePostProcessProcessor
     {
         processed = null;
 
-        if (!AlphaMaskProcessor.TryBuildMask(source, trimmer, out var maskData))
-        {
-            return false;
-        }
-
         Color[] pixels;
         try
         {
@@ -109,7 +104,7 @@ public static class TexturePostProcessProcessor
 
         if (mode == NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor)
         {
-            ApplyFillColor(maskData.mask, pixels, width, height, fillColor);
+            ApplyFillColor(pixels, width, height, fillColor, trimmer.alphaThreshold);
         }
         else if (mode == NDMFVRoidMeshTrimmer.TexturePostProcessMode.Solidify)
         {
@@ -180,18 +175,18 @@ public static class TexturePostProcessProcessor
         return null;
     }
 
-    private static void ApplyFillColor(bool[,] mask, Color[] pixels, int width, int height, Color fillColor)
+    private static void ApplyFillColor(Color[] pixels, int width, int height, Color fillColor, float alphaThreshold)
     {
         for (int y = 0; y < height; y++)
         {
             for (int x = 0; x < width; x++)
             {
-                if (mask[x, y])
+                int index = y * width + x;
+                if (pixels[index].a >= alphaThreshold)
                 {
                     continue;
                 }
 
-                int index = y * width + x;
                 Color c = pixels[index];
                 c.r = fillColor.r;
                 c.g = fillColor.g;
