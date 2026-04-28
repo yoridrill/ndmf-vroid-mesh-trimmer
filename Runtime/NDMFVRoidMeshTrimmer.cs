@@ -26,7 +26,7 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour
     {
         public bool enabled = true;
         public Texture2D mainTexture;
-        public TexturePostProcessMode texturePostProcessMode = TexturePostProcessMode.None;
+        public TexturePostProcessMode texturePostProcessMode = TexturePostProcessMode.Solidify;
         public Color fillColor = Color.black;
         public List<RendererSubMeshRef> usages = new List<RendererSubMeshRef>();
     }

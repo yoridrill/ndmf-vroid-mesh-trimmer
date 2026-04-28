@@ -8,16 +8,26 @@ using nadena.dev.ndmf;
 [CustomEditor(typeof(NDMFVRoidMeshTrimmer))]
 public class NDMFVRoidMeshTrimmerEditor : Editor
 {
+    private const string LanguagePrefKey = "NDMFVRoidMeshTrimmerEditor.Language";
+    private enum UiLanguage { English = 0, Japanese = 1 }
+
     private readonly Dictionary<int, bool> _foldouts = new Dictionary<int, bool>();
+    private UiLanguage _language;
+
+    private void OnEnable()
+    {
+        _language = (UiLanguage)EditorPrefs.GetInt(LanguagePrefKey, (int)UiLanguage.English);
+    }
 
     public override void OnInspectorGUI()
     {
         serializedObject.Update();
 
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("enabled"));
+        DrawLanguageSelector();
+        EditorGUILayout.PropertyField(serializedObject.FindProperty("enabled"), new GUIContent(T("有効", "Enabled")));
 
         EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Basic Settings", EditorStyles.boldLabel);
+        EditorGUILayout.LabelField(T("基本設定", "Basic Settings"), EditorStyles.boldLabel);
         DrawSetting("alphaThreshold");
         DrawSetting("maskDilatePixels");
         DrawSetting("maskClosePixels");
@@ -29,7 +39,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         DrawSetting("minTriangleWorldArea");
 
         EditorGUILayout.Space();
-        if (GUILayout.Button("Auto Detect Targets"))
+        if (GUILayout.Button(T("対象を自動検出", "Auto Detect Targets")))
         {
             AutoDetectTargets((NDMFVRoidMeshTrimmer)target);
             serializedObject.Update();
@@ -40,15 +50,47 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         serializedObject.ApplyModifiedProperties();
     }
 
+    private void DrawLanguageSelector()
+    {
+        EditorGUILayout.BeginHorizontal();
+        GUILayout.FlexibleSpace();
+        EditorGUI.BeginChangeCheck();
+        _language = (UiLanguage)EditorGUILayout.EnumPopup(_language, GUILayout.Width(140f));
+        if (EditorGUI.EndChangeCheck())
+        {
+            EditorPrefs.SetInt(LanguagePrefKey, (int)_language);
+        }
+        EditorGUILayout.EndHorizontal();
+    }
+
+    private string T(string ja, string en) => _language == UiLanguage.Japanese ? ja : en;
+
     private void DrawSetting(string name)
     {
-        EditorGUILayout.PropertyField(serializedObject.FindProperty(name));
+        EditorGUILayout.PropertyField(serializedObject.FindProperty(name), new GUIContent(GetSettingLabel(name)));
+    }
+
+    private string GetSettingLabel(string name)
+    {
+        switch (name)
+        {
+            case "alphaThreshold": return T("アルファ閾値", "Alpha Threshold");
+            case "maskDilatePixels": return T("マスク膨張ピクセル", "Mask Dilate Pixels");
+            case "maskClosePixels": return T("マスクCloseピクセル", "Mask Close Pixels");
+            case "fillSmallHolesPixels": return T("小穴埋め面積", "Fill Small Holes Pixels");
+            case "removeSmallIslandsPixels": return T("小島削除面積", "Remove Small Islands Pixels");
+            case "minIntersectionT": return T("最小交点t", "Min Intersection t");
+            case "maxIntersectionT": return T("最大交点t", "Max Intersection t");
+            case "minTriangleUvArea": return T("最小UV三角形面積", "Min Triangle UV Area");
+            case "minTriangleWorldArea": return T("最小3D三角形面積", "Min Triangle World Area");
+            default: return name;
+        }
     }
 
     private void DrawTargets(SerializedProperty targetsProp)
     {
-        EditorGUILayout.LabelField("Texture Targets", EditorStyles.boldLabel);
-        EditorGUILayout.LabelField($"Count: {targetsProp.arraySize}");
+        EditorGUILayout.LabelField(T("テクスチャ対象", "Texture Targets"), EditorStyles.boldLabel);
+        EditorGUILayout.LabelField($"{T("件数", "Count")}: {targetsProp.arraySize}");
 
         for (int i = 0; i < targetsProp.arraySize; i++)
         {
@@ -65,18 +107,18 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             EditorGUILayout.BeginHorizontal();
             enabledProp.boolValue = EditorGUILayout.Toggle(enabledProp.boolValue, GUILayout.Width(18));
-            EditorGUILayout.LabelField($"{texName}  (Usages: {usagesProp.arraySize})", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField($"{texName}  ({T("使用箇所", "Usages")}: {usagesProp.arraySize})", EditorStyles.boldLabel);
             EditorGUILayout.EndHorizontal();
-            EditorGUILayout.PropertyField(postProcessModeProp, new GUIContent("Texture Post Process"));
+            EditorGUILayout.PropertyField(postProcessModeProp, new GUIContent(T("テクスチャ後処理", "Texture Post Process")));
             bool showFillColor = postProcessModeProp.enumValueIndex == (int)NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor;
             using (new EditorGUI.DisabledScope(!showFillColor))
             {
-                EditorGUILayout.PropertyField(fillColorProp, new GUIContent("Fill Color"));
+                EditorGUILayout.PropertyField(fillColorProp, new GUIContent(T("塗り色", "Fill Color")));
             }
 
             int key = i;
             _foldouts.TryGetValue(key, out bool open);
-            bool newOpen = EditorGUILayout.Foldout(open, "Show Usages", true);
+            bool newOpen = EditorGUILayout.Foldout(open, T("使用箇所を表示", "Show Usages"), true);
             _foldouts[key] = newOpen;
 
             if (newOpen)
@@ -91,9 +133,9 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
                     var smr = rendererProp.objectReferenceValue as SkinnedMeshRenderer;
                     var mat = matProp.objectReferenceValue as Material;
-                    string rendererName = smr != null ? smr.name : "(Missing Renderer)";
-                    string matName = mat != null ? mat.name : "(Missing Material)";
-                    EditorGUILayout.LabelField($"{rendererName} / SubMesh {subMeshProp.intValue} / {matName}");
+                    string rendererName = smr != null ? smr.name : T("(Rendererなし)", "(Missing Renderer)");
+                    string matName = mat != null ? mat.name : T("(Materialなし)", "(Missing Material)");
+                    EditorGUILayout.LabelField($"{rendererName} / {T("サブメッシュ", "SubMesh")} {subMeshProp.intValue} / {matName}");
                 }
                 EditorGUI.indentLevel--;
             }
