@@ -104,7 +104,7 @@ public static class TexturePostProcessProcessor
 
         if (mode == NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor)
         {
-            ApplyFillColor(pixels, width, height, fillColor, trimmer.alphaThreshold);
+            ApplyFillColorComposite(pixels, width, height, fillColor);
         }
         else if (mode == NDMFVRoidMeshTrimmer.TexturePostProcessMode.Solidify)
         {
@@ -175,23 +175,23 @@ public static class TexturePostProcessProcessor
         return null;
     }
 
-    private static void ApplyFillColor(Color[] pixels, int width, int height, Color fillColor, float alphaThreshold)
+    private static void ApplyFillColorComposite(Color[] pixels, int width, int height, Color fillColor)
     {
         for (int y = 0; y < height; y++)
         {
             for (int x = 0; x < width; x++)
             {
                 int index = y * width + x;
-                if (pixels[index].a >= alphaThreshold)
+                Color src = pixels[index];
+                float a = Mathf.Clamp01(src.a);
+                Color outColor = new Color
                 {
-                    continue;
-                }
-
-                Color c = pixels[index];
-                c.r = fillColor.r;
-                c.g = fillColor.g;
-                c.b = fillColor.b;
-                pixels[index] = c;
+                    r = fillColor.r * (1f - a) + src.r * a,
+                    g = fillColor.g * (1f - a) + src.g * a,
+                    b = fillColor.b * (1f - a) + src.b * a,
+                    a = 1f
+                };
+                pixels[index] = outColor;
             }
         }
     }
