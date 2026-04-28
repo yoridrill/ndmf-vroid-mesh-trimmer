@@ -20,6 +20,12 @@ public static class MeshTrimProcessor
         public int intersections;
         public int allInsideButInteriorOutside;
         public int allOutsideButInteriorInside;
+        public int centroidOnlyInsidePreserved;
+        public int singleEdgeMidpointInsideDiscarded;
+        public int singleEdgeMidpointAndCentroidInsidePreserved;
+        public int twoEdgeMidpointsInsideClipped;
+        public int allEdgeMidpointsInsidePreserved;
+        public int fallbackPreserved;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -159,7 +165,10 @@ public static class MeshTrimProcessor
             Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={renderer.name}, SubMesh={sub}, Texture={task.texture.name}, " +
                       $"OriginalTriangles={stats.originalTriangles}, OutputTriangles={stats.outputTriangles}, RemovedTriangles={stats.removedTriangles}, " +
                       $"AddedVertices={stats.addedVertices}, Intersections={stats.intersections}, " +
-                      $"AllInsideButInteriorOutside={stats.allInsideButInteriorOutside}, AllOutsideButInteriorInside={stats.allOutsideButInteriorInside}");
+                      $"AllInsideButInteriorOutside={stats.allInsideButInteriorOutside}, AllOutsideButInteriorInside={stats.allOutsideButInteriorInside}, " +
+                      $"CentroidOnlyInsidePreserved={stats.centroidOnlyInsidePreserved}, SingleEdgeMidpointInsideDiscarded={stats.singleEdgeMidpointInsideDiscarded}, " +
+                      $"SingleEdgeMidpointAndCentroidInsidePreserved={stats.singleEdgeMidpointAndCentroidInsidePreserved}, TwoEdgeMidpointsInsideClipped={stats.twoEdgeMidpointsInsideClipped}, " +
+                      $"AllEdgeMidpointsInsidePreserved={stats.allEdgeMidpointsInsidePreserved}, FallbackPreserved={stats.fallbackPreserved}");
         }
 
         Mesh dst = new Mesh
@@ -224,12 +233,20 @@ public static class MeshTrimProcessor
             bool in0 = AlphaMaskProcessor.SampleMask(maskData, uv[i0]);
             bool in1 = AlphaMaskProcessor.SampleMask(maskData, uv[i1]);
             bool in2 = AlphaMaskProcessor.SampleMask(maskData, uv[i2]);
+            Vector2 m01 = (uv[i0] + uv[i1]) * 0.5f;
+            Vector2 m12 = (uv[i1] + uv[i2]) * 0.5f;
+            Vector2 m20 = (uv[i2] + uv[i0]) * 0.5f;
+            Vector2 centroid = (uv[i0] + uv[i1] + uv[i2]) / 3f;
+            bool m01In = AlphaMaskProcessor.SampleMask(maskData, m01);
+            bool m12In = AlphaMaskProcessor.SampleMask(maskData, m12);
+            bool m20In = AlphaMaskProcessor.SampleMask(maskData, m20);
+            bool centroidIn = AlphaMaskProcessor.SampleMask(maskData, centroid);
 
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
 
             if (insideCount == 3)
             {
-                if (HasAnyInteriorOutside(maskData, uv[i0], uv[i1], uv[i2]))
+                if (!m01In || !m12In || !m20In || !centroidIn)
                 {
                     stats.allInsideButInteriorOutside++;
                 }
@@ -240,12 +257,92 @@ public static class MeshTrimProcessor
 
             if (insideCount == 0)
             {
-                if (HasAnyInteriorInside(maskData, uv[i0], uv[i1], uv[i2]))
+                int edgeInsideCount = (m01In ? 1 : 0) + (m12In ? 1 : 0) + (m20In ? 1 : 0);
+                if (m01In || m12In || m20In || centroidIn)
                 {
                     stats.allOutsideButInteriorInside++;
                 }
 
-                stats.removedTriangles++;
+                if (edgeInsideCount == 0)
+                {
+                    if (centroidIn)
+                    {
+                        AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                        stats.centroidOnlyInsidePreserved++;
+                    }
+                    else
+                    {
+                        stats.removedTriangles++;
+                    }
+                    continue;
+                }
+
+                if (edgeInsideCount == 1)
+                {
+                    if (centroidIn)
+                    {
+                        AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                        stats.singleEdgeMidpointAndCentroidInsidePreserved++;
+                    }
+                    else
+                    {
+                        stats.removedTriangles++;
+                        stats.singleEdgeMidpointInsideDiscarded++;
+                    }
+                    continue;
+                }
+
+                if (edgeInsideCount == 3)
+                {
+                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                    stats.allEdgeMidpointsInsidePreserved++;
+                    continue;
+                }
+
+                int virtualInside = -1;
+                int edgeA1 = -1, edgeB1 = -1;
+                int edgeA2 = -1, edgeB2 = -1;
+                if (m01In && m20In)
+                {
+                    virtualInside = i0;
+                    edgeA1 = i0; edgeB1 = i1;
+                    edgeA2 = i0; edgeB2 = i2;
+                }
+                else if (m01In && m12In)
+                {
+                    virtualInside = i1;
+                    edgeA1 = i1; edgeB1 = i0;
+                    edgeA2 = i1; edgeB2 = i2;
+                }
+                else if (m12In && m20In)
+                {
+                    virtualInside = i2;
+                    edgeA1 = i2; edgeB1 = i1;
+                    edgeA2 = i2; edgeB2 = i0;
+                }
+                else
+                {
+                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                    stats.fallbackPreserved++;
+                    continue;
+                }
+
+                if (!TryCreateIntersectionFromInsideSegment(maskData, trimmer, edgeA1, edgeB1, 0.5f, 1f,
+                        vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                        hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                        ref stats, out int cutA)
+                    || !TryCreateIntersectionFromInsideSegment(maskData, trimmer, edgeA2, edgeB2, 0.5f, 1f,
+                        vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                        hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                        ref stats, out int cutB))
+                {
+                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                    stats.fallbackPreserved++;
+                    continue;
+                }
+
+                AddTrianglePreserveWinding(dstIndices, i0, i1, i2, virtualInside, cutA, cutB, vertices, uv, trimmer, ref stats);
+                stats.twoEdgeMidpointsInsideClipped++;
                 continue;
             }
 
@@ -404,28 +501,109 @@ public static class MeshTrimProcessor
         return newIndex;
     }
 
-    private static bool HasAnyInteriorOutside(AlphaMaskProcessor.AlphaMaskData data, Vector2 a, Vector2 b, Vector2 c)
+    private static bool TryCreateIntersectionFromInsideSegment(
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        NDMFVRoidMeshTrimmer trimmer,
+        int edgeA,
+        int edgeB,
+        float insideT,
+        float outsideT,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Vector2> uv,
+        List<Vector2> uv2,
+        List<Vector2> uv3,
+        List<Vector2> uv4,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasUv2,
+        bool hasUv3,
+        bool hasUv4,
+        bool hasColors,
+        bool hasBoneWeights,
+        ref TrimStats stats,
+        out int index)
     {
-        Vector2 ab = (a + b) * 0.5f;
-        Vector2 bc = (b + c) * 0.5f;
-        Vector2 ca = (c + a) * 0.5f;
-        Vector2 center = (a + b + c) / 3f;
-        return !AlphaMaskProcessor.SampleMask(data, ab)
-               || !AlphaMaskProcessor.SampleMask(data, bc)
-               || !AlphaMaskProcessor.SampleMask(data, ca)
-               || !AlphaMaskProcessor.SampleMask(data, center);
+        index = -1;
+        Vector2 uvA = uv[edgeA];
+        Vector2 uvB = uv[edgeB];
+        Vector2 uvIn = Vector2.LerpUnclamped(uvA, uvB, insideT);
+        Vector2 uvOut = Vector2.LerpUnclamped(uvA, uvB, outsideT);
+
+        bool startInside = AlphaMaskProcessor.SampleMask(maskData, uvIn);
+        bool endOutside = !AlphaMaskProcessor.SampleMask(maskData, uvOut);
+        if (!startInside || !endOutside)
+        {
+            return false;
+        }
+
+        float lo = 0f;
+        float hi = 1f;
+        for (int i = 0; i < 10; i++)
+        {
+            float mid = (lo + hi) * 0.5f;
+            Vector2 uvMid = Vector2.LerpUnclamped(uvIn, uvOut, mid);
+            if (AlphaMaskProcessor.SampleMask(maskData, uvMid))
+            {
+                lo = mid;
+            }
+            else
+            {
+                hi = mid;
+            }
+        }
+
+        float localT = lo;
+        if (localT >= trimmer.maxIntersectionT)
+        {
+            index = edgeB;
+            return true;
+        }
+
+        float clampedLocal = localT <= trimmer.minIntersectionT ? 0f : localT;
+        float globalT = Mathf.LerpUnclamped(insideT, outsideT, clampedLocal);
+        index = AddInterpolatedVertex(edgeA, edgeB, globalT, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, ref stats);
+        return true;
     }
 
-    private static bool HasAnyInteriorInside(AlphaMaskProcessor.AlphaMaskData data, Vector2 a, Vector2 b, Vector2 c)
+    private static int AddInterpolatedVertex(
+        int a,
+        int b,
+        float t,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Vector2> uv,
+        List<Vector2> uv2,
+        List<Vector2> uv3,
+        List<Vector2> uv4,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasUv2,
+        bool hasUv3,
+        bool hasUv4,
+        bool hasColors,
+        bool hasBoneWeights,
+        ref TrimStats stats)
     {
-        Vector2 ab = (a + b) * 0.5f;
-        Vector2 bc = (b + c) * 0.5f;
-        Vector2 ca = (c + a) * 0.5f;
-        Vector2 center = (a + b + c) / 3f;
-        return AlphaMaskProcessor.SampleMask(data, ab)
-               || AlphaMaskProcessor.SampleMask(data, bc)
-               || AlphaMaskProcessor.SampleMask(data, ca)
-               || AlphaMaskProcessor.SampleMask(data, center);
+        int newIndex = vertices.Count;
+        vertices.Add(MeshAttributeInterpolator.Lerp(vertices[a], vertices[b], t));
+        if (hasNormals) normals.Add(MeshAttributeInterpolator.Lerp(normals[a], normals[b], t).normalized);
+        if (hasTangents) tangents.Add(MeshAttributeInterpolator.Lerp(tangents[a], tangents[b], t));
+        uv.Add(MeshAttributeInterpolator.Lerp(uv[a], uv[b], t));
+        if (hasUv2) uv2.Add(MeshAttributeInterpolator.Lerp(uv2[a], uv2[b], t));
+        if (hasUv3) uv3.Add(MeshAttributeInterpolator.Lerp(uv3[a], uv3[b], t));
+        if (hasUv4) uv4.Add(MeshAttributeInterpolator.Lerp(uv4[a], uv4[b], t));
+        if (hasColors) colors.Add(MeshAttributeInterpolator.Lerp(colors[a], colors[b], t));
+        if (hasBoneWeights) boneWeights.Add(MeshAttributeInterpolator.Lerp(boneWeights[a], boneWeights[b], t));
+        stats.intersections++;
+        return newIndex;
     }
 
     private static void AddTrianglePreserveWinding(
