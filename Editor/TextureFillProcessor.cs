@@ -113,7 +113,7 @@ public static class TexturePostProcessProcessor
         }
         else if (mode == NDMFVRoidMeshTrimmer.TexturePostProcessMode.Solidify)
         {
-            ApplySolidify(maskData.mask, pixels, width, height);
+            ApplySolidify(pixels, width, height, trimmer.alphaThreshold);
         }
 
         bool linear = false;
@@ -201,7 +201,7 @@ public static class TexturePostProcessProcessor
         }
     }
 
-    private static void ApplySolidify(bool[,] mask, Color[] pixels, int width, int height)
+    private static void ApplySolidify(Color[] pixels, int width, int height, float alphaThreshold)
     {
         int size = width * height;
         bool[] isSeed = new bool[size];
@@ -218,13 +218,18 @@ public static class TexturePostProcessProcessor
             for (int x = 0; x < width; x++)
             {
                 int index = y * width + x;
-                if (mask[x, y])
+                if (pixels[index].a >= alphaThreshold)
                 {
                     isSeed[index] = true;
                     nearest[index] = index;
                     queue.Enqueue(index);
                 }
             }
+        }
+
+        if (queue.Count == 0)
+        {
+            return;
         }
 
         int[] nx = { 1, -1, 0, 0 };
