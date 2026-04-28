@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UnityEditor;
 using UnityEngine;
 
 public static class TexturePostProcessProcessor
@@ -47,7 +48,7 @@ public static class TexturePostProcessProcessor
                 int key = HashMaterialKey(usage.material, processedTexture);
                 if (!materialCache.TryGetValue(key, out Material replacement))
                 {
-                    if (!MaterialMainTextureResolver.TryGetMainTexture(usage.material, out _, out string textureProperty))
+                    if (!MaterialMainTextureResolver.TryGetMainTexture(usage.material, out Texture2D sourceMainTexture, out string textureProperty))
                     {
                         continue;
                     }
@@ -57,6 +58,7 @@ public static class TexturePostProcessProcessor
                         name = usage.material.name + "_NDMFVRoidProcessed"
                     };
                     replacement.SetTexture(textureProperty, processedTexture);
+                    ReplaceAllMatchingTextureSlots(replacement, sourceMainTexture, processedTexture);
                     materialCache[key] = replacement;
                 }
 
@@ -175,6 +177,34 @@ public static class TexturePostProcessProcessor
         return null;
     }
 
+    private static void ReplaceAllMatchingTextureSlots(Material material, Texture2D sourceTexture, Texture2D processedTexture)
+    {
+        if (material == null || sourceTexture == null || processedTexture == null || material.shader == null)
+        {
+            return;
+        }
+
+        int count = ShaderUtil.GetPropertyCount(material.shader);
+        for (int i = 0; i < count; i++)
+        {
+            if (ShaderUtil.GetPropertyType(material.shader, i) != ShaderUtil.ShaderPropertyType.TexEnv)
+            {
+                continue;
+            }
+
+            string propName = ShaderUtil.GetPropertyName(material.shader, i);
+            if (!material.HasProperty(propName))
+            {
+                continue;
+            }
+
+            if (material.GetTexture(propName) == sourceTexture)
+            {
+                material.SetTexture(propName, processedTexture);
+            }
+        }
+    }
+
     private static void ApplyFillColorComposite(Color[] pixels, int width, int height, Color fillColor)
     {
         for (int y = 0; y < height; y++)
@@ -189,7 +219,7 @@ public static class TexturePostProcessProcessor
                     r = fillColor.r * (1f - a) + src.r * a,
                     g = fillColor.g * (1f - a) + src.g * a,
                     b = fillColor.b * (1f - a) + src.b * a,
-                    a = 1f
+                    a = src.a
                 };
                 pixels[index] = outColor;
             }
