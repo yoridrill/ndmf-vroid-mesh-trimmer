@@ -120,17 +120,64 @@ public static class TexturePostProcessProcessor
 #if UNITY_2020_1_OR_NEWER
         linear = !source.isDataSRGB;
 #endif
-        processed = new Texture2D(width, height, source.format, source.mipmapCount > 1, linear)
+        processed = CreateWritableTexture(width, height, source, linear);
+        if (processed == null)
         {
-            name = source.name + "_NDMFVRoidProcessed",
-            wrapMode = source.wrapMode,
-            filterMode = source.filterMode,
-            anisoLevel = source.anisoLevel
+            Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] Texture post-process skipped (failed to create writable texture): {source.name}");
+            return false;
+        }
+
+        try
+        {
+            processed.SetPixels(pixels);
+            processed.Apply(source.mipmapCount > 1, false);
+            return true;
+        }
+        catch (UnityException ex)
+        {
+            Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] Texture post-process skipped (SetPixels failed): {source.name} - {ex.Message}");
+            Object.DestroyImmediate(processed);
+            processed = null;
+            return false;
+        }
+    }
+
+    private static Texture2D CreateWritableTexture(int width, int height, Texture2D source, bool linear)
+    {
+        bool mipChain = source.mipmapCount > 1;
+        Texture2D tex = null;
+
+        // 圧縮/非対応フォーマットで SetPixels が失敗するケースがあるため、常に書き込み可能な標準フォーマットで作成する。
+        TextureFormat[] formats =
+        {
+            TextureFormat.RGBA32,
+            TextureFormat.ARGB32
         };
 
-        processed.SetPixels(pixels);
-        processed.Apply(source.mipmapCount > 1, false);
-        return true;
+        foreach (var format in formats)
+        {
+            try
+            {
+                tex = new Texture2D(width, height, format, mipChain, linear)
+                {
+                    name = source.name + "_NDMFVRoidProcessed",
+                    wrapMode = source.wrapMode,
+                    filterMode = source.filterMode,
+                    anisoLevel = source.anisoLevel
+                };
+                return tex;
+            }
+            catch (UnityException)
+            {
+                if (tex != null)
+                {
+                    Object.DestroyImmediate(tex);
+                    tex = null;
+                }
+            }
+        }
+
+        return null;
     }
 
     private static void ApplyFillColor(bool[,] mask, Color[] pixels, int width, int height, Color fillColor)
