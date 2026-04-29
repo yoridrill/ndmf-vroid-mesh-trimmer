@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 [DisallowMultipleComponent]
-[AddComponentMenu("NDMF VRoid Mesh Trimmer")]
+[AddComponentMenu("yoridrill/NDMF VRoid Mesh Trimmer")]
 public class NDMFVRoidMeshTrimmer : MonoBehaviour
 {
     public enum TexturePostProcessMode

@@ -264,26 +264,26 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
             EditorGUILayout.BeginVertical();
             EditorGUILayout.LabelField($"{textureName} ({T("使用箇所", "Usages")}: {usagesProp.arraySize})", EditorStyles.boldLabel);
-            var materialsLabel = new GUIContent(T("マテリアル", "Materials"), materialNames);
-            EditorGUILayout.LabelField(materialsLabel, new GUIContent(materialNames));
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(T("マテリアル", "Materials"), GUILayout.Width(compactLabelWidth));
+            GUILayout.Label(new GUIContent(materialNames, materialNames), EditorStyles.label);
+            EditorGUILayout.EndHorizontal();
 
             EditorGUI.BeginChangeCheck();
-            float prevLabelWidth = EditorGUIUtility.labelWidth;
-            EditorGUIUtility.labelWidth = compactLabelWidth;
             var mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex;
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(T("Fill Mode", "Fill Mode"), GUILayout.Width(compactLabelWidth));
             if (mode == NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor)
             {
-                EditorGUILayout.BeginHorizontal();
-                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(T("Fill Mode", "Fill Mode"), mode, GUILayout.MaxWidth(220f));
+                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(mode, GUILayout.MaxWidth(160f));
                 EditorGUILayout.PropertyField(fillColorProp, GUIContent.none, GUILayout.MaxWidth(120f));
-                EditorGUILayout.EndHorizontal();
             }
             else
             {
-                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(T("Fill Mode", "Fill Mode"), mode);
+                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(mode, GUILayout.MaxWidth(240f));
             }
+            EditorGUILayout.EndHorizontal();
             modeProp.enumValueIndex = (int)mode;
-            EditorGUIUtility.labelWidth = prevLabelWidth;
             if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.TextureOnly);
 
             EditorGUILayout.EndVertical();
@@ -639,6 +639,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
 public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlugin>
 {
+    public override string QualifiedName => "jp.yoridrill.ndmf-vroid-mesh-trimmer";
     public override string DisplayName => "NDMF VRoid Mesh Trimmer";
 
     protected override void Configure()
