@@ -435,6 +435,9 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
     private static void RebuildPreviewTexturesAndMaterials(NDMFVRoidMeshTrimmer trimmer, PreviewState state, ref int textureFillExecCount)
     {
+        bool useToonStandardShaderForPreview = trimmer != null && (trimmer.enableForAndroid || trimmer.enableForiOS);
+        Shader toonStandardShader = useToonStandardShaderForPreview ? FindToonStandardShaderForPreview() : null;
+
         foreach (var texState in state.textureStates.Values)
         {
             if (texState.previewTexture != null) UnityEngine.Object.DestroyImmediate(texState.previewTexture);
@@ -475,6 +478,10 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
                     name = m.name + " (NDMF VRoid Mesh Trimmer Preview)",
                     hideFlags = HideFlags.HideAndDontSave
                 };
+                if (toonStandardShader != null)
+                {
+                    pm.shader = toonStandardShader;
+                }
                 pm.SetTexture(prop, previewTex);
                 mats[i] = pm;
                 textureFillExecCount++;
@@ -493,6 +500,24 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         }
     }
 
+
+    private static Shader FindToonStandardShaderForPreview()
+    {
+        // Prefer VRChat mobile Toon Standard if available, then fallback to generic ToonStandard naming.
+        string[] candidates =
+        {
+            "VRChat/Mobile/Toon Standard",
+            "ToonStandard"
+        };
+
+        foreach (var shaderName in candidates)
+        {
+            var shader = Shader.Find(shaderName);
+            if (shader != null) return shader;
+        }
+
+        return null;
+    }
     private static void ClearPreview(NDMFVRoidMeshTrimmer trimmer)
     {
         if (trimmer == null) return;
