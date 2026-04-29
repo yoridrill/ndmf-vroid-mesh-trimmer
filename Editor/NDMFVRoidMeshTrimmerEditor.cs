@@ -42,7 +42,6 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
     private static readonly Dictionary<int, PreviewState> PreviewByInstanceId = new Dictionary<int, PreviewState>();
 
-    private readonly Dictionary<int, bool> _foldouts = new Dictionary<int, bool>();
     private UiLanguage _language;
     private string _lastFocusedControl;
     private bool _advancedFoldout;
@@ -241,24 +240,32 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     private void DrawTargets(SerializedProperty targetsProp, PreviewState state)
     {
         EditorGUILayout.LabelField(T("テクスチャ対象", "Texture Targets"), EditorStyles.boldLabel);
+        const float previewSize = 64f;
+
         for (int i = 0; i < targetsProp.arraySize; i++)
         {
             var targetProp = targetsProp.GetArrayElementAtIndex(i);
-            var enabledProp = targetProp.FindPropertyRelative("enabled");
             var texProp = targetProp.FindPropertyRelative("mainTexture");
-            var fillEnabledProp = targetProp.FindPropertyRelative("enableTextureFill");
             var modeProp = targetProp.FindPropertyRelative("texturePostProcessMode");
             var fillColorProp = targetProp.FindPropertyRelative("fillColor");
             var usagesProp = targetProp.FindPropertyRelative("usages");
 
             Texture2D tex = texProp.objectReferenceValue as Texture2D;
+            string textureName = tex ? tex.name : "(None)";
+            string materialNames = BuildMaterialNamesText(usagesProp);
+
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUI.BeginChangeCheck();
-            enabledProp.boolValue = EditorGUILayout.ToggleLeft($"{(tex ? tex.name : "(None)")} ({T("使用箇所", "Usages")}: {usagesProp.arraySize})", enabledProp.boolValue);
-            if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.MeshOnly);
+            EditorGUILayout.BeginHorizontal();
+
+            var previewRect = GUILayoutUtility.GetRect(previewSize, previewSize, GUILayout.Width(previewSize), GUILayout.Height(previewSize));
+            if (tex != null) EditorGUI.DrawPreviewTexture(previewRect, tex, null, ScaleMode.ScaleToFit);
+            else EditorGUI.HelpBox(previewRect, "No Tex", MessageType.None);
+
+            EditorGUILayout.BeginVertical();
+            EditorGUILayout.LabelField($"{textureName} ({T("使用箇所", "Usages")}: {usagesProp.arraySize})", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField(T("マテリアル", "Materials"), materialNames);
 
             EditorGUI.BeginChangeCheck();
-            fillEnabledProp.boolValue = EditorGUILayout.ToggleLeft(T("Texture Fillを有効", "Enable Texture Fill"), fillEnabledProp.boolValue);
             modeProp.enumValueIndex = (int)(NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(T("Fill Mode", "Fill Mode"), (NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex);
             if ((NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex == NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor)
             {
@@ -266,25 +273,29 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             }
             if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.TextureOnly);
 
-            _foldouts.TryGetValue(i, out bool open);
-            open = EditorGUILayout.Foldout(open, T("使用箇所を表示", "Show Usages"), true);
-            _foldouts[i] = open;
-            if (open)
-            {
-                for (int u = 0; u < usagesProp.arraySize; u++)
-                {
-                    var usage = usagesProp.GetArrayElementAtIndex(u);
-                    var rendererProp = usage.FindPropertyRelative("renderer");
-                    var subMeshProp = usage.FindPropertyRelative("subMeshIndex");
-                    var matProp = usage.FindPropertyRelative("material");
-                    var smr = rendererProp.objectReferenceValue as SkinnedMeshRenderer;
-                    var mat = matProp.objectReferenceValue as Material;
-                    EditorGUILayout.LabelField($"{(smr ? smr.name : "(Missing Renderer)")} / SubMesh {subMeshProp.intValue} / {(mat ? mat.name : "(Missing Material)")}");
-                }
-            }
-
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
             EditorGUILayout.EndVertical();
         }
+    }
+
+    private static string BuildMaterialNamesText(SerializedProperty usagesProp)
+    {
+        if (usagesProp == null || usagesProp.arraySize == 0) return "-";
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        for (int i = 0; i < usagesProp.arraySize; i++)
+        {
+            var usageProp = usagesProp.GetArrayElementAtIndex(i);
+            var materialProp = usageProp.FindPropertyRelative("material");
+            var mat = materialProp.objectReferenceValue as Material;
+            if (mat == null) continue;
+            if (!seen.Add(mat.name)) continue;
+            names.Add(mat.name);
+        }
+
+        return names.Count > 0 ? string.Join(", ", names) : "-";
     }
 
     private static PreviewState GetPreviewState(NDMFVRoidMeshTrimmer trimmer)
