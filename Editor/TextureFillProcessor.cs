@@ -17,6 +17,7 @@ public static class TexturePostProcessProcessor
         foreach (var target in trimmer.targets)
         {
             if (target == null || !target.enabled || target.mainTexture == null ||
+                !target.enableTextureFill ||
                 target.texturePostProcessMode == NDMFVRoidMeshTrimmer.TexturePostProcessMode.None)
             {
                 continue;
@@ -137,6 +138,16 @@ public static class TexturePostProcessProcessor
             processed = null;
             return false;
         }
+    }
+
+    public static bool TryCreateProcessedTextureForPreview(
+        Texture2D source,
+        NDMFVRoidMeshTrimmer.TexturePostProcessMode mode,
+        Color fillColor,
+        NDMFVRoidMeshTrimmer trimmer,
+        out Texture2D processed)
+    {
+        return TryCreateProcessedTexture(source, mode, fillColor, trimmer, out processed);
     }
 
     private static Texture2D CreateWritableTexture(int width, int height, Texture2D source, bool linear)

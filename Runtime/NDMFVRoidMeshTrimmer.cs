@@ -26,9 +26,18 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour
     {
         public bool enabled = true;
         public Texture2D mainTexture;
+        public bool enableTextureFill = true;
         public TexturePostProcessMode texturePostProcessMode = TexturePostProcessMode.Solidify;
         public Color fillColor = Color.black;
         public List<RendererSubMeshRef> usages = new List<RendererSubMeshRef>();
+    }
+
+    [Serializable]
+    public class PreviewRecoveryRecord
+    {
+        public SkinnedMeshRenderer renderer;
+        public Mesh originalSharedMesh;
+        public Material[] originalSharedMaterials;
     }
 
     public bool enabled = true;
@@ -45,4 +54,15 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour
 
     [Min(0f)] public float minTriangleUvArea = 0.0000001f;
     [Min(0f)] public float minTriangleWorldArea = 0.0000001f;
+
+    [SerializeField] private bool previewActiveSerialized;
+    [SerializeField] private List<PreviewRecoveryRecord> previewRecoveryRecords = new List<PreviewRecoveryRecord>();
+
+    public bool PreviewActiveSerialized
+    {
+        get => previewActiveSerialized;
+        set => previewActiveSerialized = value;
+    }
+
+    public List<PreviewRecoveryRecord> PreviewRecoveryRecords => previewRecoveryRecords;
 }
