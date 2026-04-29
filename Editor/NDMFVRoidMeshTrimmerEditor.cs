@@ -437,7 +437,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         };
     }
 
-    private static void ClearAllPreviews()
+    internal static void ClearAllPreviews()
     {
         foreach (var obj in UnityEngine.Object.FindObjectsOfType<NDMFVRoidMeshTrimmer>())
         {
@@ -504,7 +504,7 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
             var avatarRoot = context.AvatarRootObject;
             if (avatarRoot == null) return;
             var trimmers = avatarRoot.GetComponentsInChildren<NDMFVRoidMeshTrimmer>(true);
-            ClearAllPreviews();
+            NDMFVRoidMeshTrimmerEditor.ClearAllPreviews();
             foreach (var trimmer in trimmers)
             {
                 if (trimmer == null || !trimmer.enabled) continue;
