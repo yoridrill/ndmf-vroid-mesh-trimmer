@@ -42,6 +42,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
     private readonly Dictionary<int, bool> _foldouts = new Dictionary<int, bool>();
     private UiLanguage _language;
+    private string _lastFocusedControl;
 
     private void OnEnable()
     {
@@ -138,7 +139,17 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     {
         if (!state.active || state.pending == PreviewUpdateType.None) return;
         var e = Event.current;
-        bool commit = e.type == EventType.MouseUp || (e.type == EventType.KeyDown && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter));
+        bool focusLostCommit = false;
+        string currentFocus = GUI.GetNameOfFocusedControl();
+        if (!string.IsNullOrEmpty(_lastFocusedControl) && string.IsNullOrEmpty(currentFocus))
+        {
+            focusLostCommit = true;
+        }
+        _lastFocusedControl = currentFocus;
+
+        bool commit = e.type == EventType.MouseUp
+                      || (e.type == EventType.KeyDown && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter))
+                      || focusLostCommit;
         if (!commit) return;
 
         BuildPreview(trimmer, state, state.pending);
@@ -493,6 +504,7 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
             var avatarRoot = context.AvatarRootObject;
             if (avatarRoot == null) return;
             var trimmers = avatarRoot.GetComponentsInChildren<NDMFVRoidMeshTrimmer>(true);
+            ClearAllPreviews();
             foreach (var trimmer in trimmers)
             {
                 if (trimmer == null || !trimmer.enabled) continue;
