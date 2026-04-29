@@ -79,30 +79,19 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         DrawSetting("maskClosePixels");
         DrawSetting("fillSmallHolesPixels");
         DrawSetting("removeSmallIslandsPixels");
-        DrawSetting("minIntersectionT");
-        DrawSetting("maxIntersectionT");
-        DrawSetting("minTriangleUvArea");
-        DrawSetting("minTriangleWorldArea");
+        EditorGUILayout.PropertyField(serializedObject.FindProperty("enableTexturePadding"), new GUIContent(T("テクスチャの余白を塗り足す", "Pad Texture Transparent Areas")));
 
         if (EditorGUI.EndChangeCheck())
         {
             QueuePreviewUpdate(state, PreviewUpdateType.MeshOnly);
         }
 
-        EditorGUILayout.Space();
-        if (GUILayout.Button(T("対象を自動検出", "Auto Detect Targets")))
+        if (trimmer.enableTexturePadding)
         {
-            bool wasPreview = state.active;
-            if (wasPreview) ClearPreview(trimmer);
-            AutoDetectTargets(trimmer);
-            serializedObject.Update();
-            if (wasPreview)
-            {
-                BuildPreview(trimmer, GetPreviewState(trimmer), PreviewUpdateType.MeshAndTexture);
-            }
+            EnsureAutoDetectedTargets(trimmer, false);
+            DrawTargets(serializedObject.FindProperty("targets"), state);
         }
 
-        DrawTargets(serializedObject.FindProperty("targets"), state);
         DrawAdvancedSection(trimmer);
         serializedObject.ApplyModifiedProperties();
 
@@ -312,6 +301,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     private static void RequestBuildPreview(NDMFVRoidMeshTrimmer trimmer, PreviewState state, PreviewUpdateType type)
     {
         if (trimmer == null || state.queued || state.processing) return;
+        EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
         state.queued = true;
         state.processing = true;
         EditorUtility.SetDirty(trimmer);
@@ -567,6 +557,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             {
                 Material mat = mats[sub];
                 if (mat == null) continue;
+                if (!ShouldProcessMaterial(mat)) continue;
                 if (!MaterialMainTextureResolver.TryGetMainTexture(mat, out Texture2D tex, out _)) continue;
 
                 if (!grouped.TryGetValue(tex, out var targetSettings))
@@ -588,6 +579,37 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
         trimmer.targets.AddRange(grouped.Values);
         EditorUtility.SetDirty(trimmer);
+    }
+
+    private static void EnsureAutoDetectedTargets(NDMFVRoidMeshTrimmer trimmer, bool forceRefresh)
+    {
+        if (trimmer == null) return;
+        if (forceRefresh || trimmer.targets == null || trimmer.targets.Count == 0) AutoDetectTargets(trimmer);
+    }
+
+    private static bool ShouldProcessMaterial(Material mat)
+    {
+        if (mat == null) return false;
+        if (mat.renderQueue >= (int)UnityEngine.Rendering.RenderQueue.Transparent) return true;
+
+        string renderType = mat.GetTag("RenderType", false, string.Empty);
+        if (string.Equals(renderType, "Transparent", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(renderType, "TransparentCutout", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (mat.HasProperty("_MToonSurface")) return Mathf.RoundToInt(mat.GetFloat("_MToonSurface")) != 0;
+        if (mat.HasProperty("_BlendMode")) return Mathf.RoundToInt(mat.GetFloat("_BlendMode")) != 0; // legacy MToon
+        if (mat.HasProperty("_TransparentMode")) return Mathf.RoundToInt(mat.GetFloat("_TransparentMode")) != 0; // lilToon
+        if (mat.HasProperty("_Surface")) return Mathf.RoundToInt(mat.GetFloat("_Surface")) != 0; // URP/HDRP
+
+        if (mat.IsKeywordEnabled("_ALPHATEST_ON") || mat.IsKeywordEnabled("_ALPHABLEND_ON") || mat.IsKeywordEnabled("_ALPHAPREMULTIPLY_ON"))
+        {
+            return true;
+        }
+
+        return false;
     }
 }
 
@@ -612,6 +634,7 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
             foreach (var trimmer in trimmers)
             {
                 if (trimmer == null || !IsEnabledForCurrentBuildTarget(trimmer)) continue;
+                EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
                 MeshTrimProcessor.ApplyTrim(trimmer, true);
                 TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
             }
