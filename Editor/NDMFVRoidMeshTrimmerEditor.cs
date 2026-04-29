@@ -166,6 +166,15 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         bool commit = e.type == EventType.MouseUp
                       || (e.type == EventType.KeyDown && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter))
                       || focusLostCommit;
+
+        if (!commit)
+        {
+            // Fallback: when no control is actively dragged/edited, apply pending update on next safe UI event.
+            bool idleCommit = GUIUtility.hotControl == 0
+                              && !EditorGUIUtility.editingTextField
+                              && (e.type == EventType.Repaint || e.type == EventType.Layout);
+            commit = idleCommit;
+        }
         if (!commit) return;
 
         BuildPreview(trimmer, state, state.pending);
