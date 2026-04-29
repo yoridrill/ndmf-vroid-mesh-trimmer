@@ -36,6 +36,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         public readonly Dictionary<Texture2D, TexturePreviewState> textureStates = new Dictionary<Texture2D, TexturePreviewState>();
         public bool active;
         public PreviewUpdateType pending;
+        public bool processing;
     }
 
     private static readonly Dictionary<int, PreviewState> PreviewByInstanceId = new Dictionary<int, PreviewState>();
@@ -133,6 +134,10 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         {
             if (state.active) ClearPreview(trimmer);
             else BuildPreview(trimmer, state, PreviewUpdateType.MeshAndTexture);
+        }
+        if (state.processing)
+        {
+            EditorGUILayout.LabelField("Processing...", GUILayout.Width(90f));
         }
         GUI.backgroundColor = oldColor;
 
@@ -257,52 +262,61 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     private static void BuildPreview(NDMFVRoidMeshTrimmer trimmer, PreviewState state, PreviewUpdateType type)
     {
         if (trimmer == null) return;
+        state.processing = true;
+        EditorUtility.SetDirty(trimmer);
         var sw = System.Diagnostics.Stopwatch.StartNew();
-
-        if (!state.active)
+        try
         {
-            state.active = true;
-            CaptureOriginals(trimmer, state);
-        }
 
-        int meshCount = 0;
-        int texCount = 0;
-
-        if (type == PreviewUpdateType.MeshOnly || type == PreviewUpdateType.MeshAndTexture)
-        {
-            foreach (var kv in state.rendererStates)
+            if (!state.active)
             {
-                var r = kv.Value;
-                if (r.renderer == null || r.originalSharedMesh == null) continue;
-                r.renderer.sharedMesh = r.originalSharedMesh;
+                state.active = true;
+                CaptureOriginals(trimmer, state);
             }
 
-            MeshTrimProcessor.ApplyTrim(trimmer, false);
-            foreach (var kv in state.rendererStates)
+            int meshCount = 0;
+            int texCount = 0;
+
+            if (type == PreviewUpdateType.MeshOnly || type == PreviewUpdateType.MeshAndTexture)
             {
-                var r = kv.Value;
-                if (r.renderer == null) continue;
-                r.previewMesh = r.renderer.sharedMesh;
-                if (r.previewMesh != null)
+                foreach (var kv in state.rendererStates)
                 {
-                    r.previewMesh.name = r.originalSharedMesh.name + " (NDMF VRoid Mesh Trimmer Preview)";
-                    r.previewMesh.hideFlags = HideFlags.HideAndDontSave;
-                    r.previewMesh.MarkDynamic();
-                    meshCount++;
+                    var r = kv.Value;
+                    if (r.renderer == null || r.originalSharedMesh == null) continue;
+                    r.renderer.sharedMesh = r.originalSharedMesh;
+                }
+
+                MeshTrimProcessor.ApplyTrim(trimmer, false);
+                foreach (var kv in state.rendererStates)
+                {
+                    var r = kv.Value;
+                    if (r.renderer == null) continue;
+                    r.previewMesh = r.renderer.sharedMesh;
+                    if (r.previewMesh != null)
+                    {
+                        r.previewMesh.name = r.originalSharedMesh.name + " (NDMF VRoid Mesh Trimmer Preview)";
+                        r.previewMesh.hideFlags = HideFlags.HideAndDontSave;
+                        r.previewMesh.MarkDynamic();
+                        meshCount++;
+                    }
                 }
             }
-        }
 
-        if (type == PreviewUpdateType.TextureOnly || type == PreviewUpdateType.MeshAndTexture)
+            if (type == PreviewUpdateType.TextureOnly || type == PreviewUpdateType.MeshAndTexture)
+            {
+                RebuildPreviewTexturesAndMaterials(trimmer, state, ref texCount);
+            }
+
+            sw.Stop();
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][Preview] UpdateType={type}, Renderers={state.rendererStates.Count}, PreviewMeshes={meshCount}, PreviewTextures={texCount}, ElapsedMs={sw.ElapsedMilliseconds}");
+
+            trimmer.PreviewActiveSerialized = true;
+            EditorUtility.SetDirty(trimmer);
+        }
+        finally
         {
-            RebuildPreviewTexturesAndMaterials(trimmer, state, ref texCount);
+            state.processing = false;
         }
-
-        sw.Stop();
-        Debug.Log($"[NDMF VRoid Mesh Trimmer][Preview] UpdateType={type}, Renderers={state.rendererStates.Count}, PreviewMeshes={meshCount}, PreviewTextures={texCount}, ElapsedMs={sw.ElapsedMilliseconds}");
-
-        trimmer.PreviewActiveSerialized = true;
-        EditorUtility.SetDirty(trimmer);
     }
 
     private static void CaptureOriginals(NDMFVRoidMeshTrimmer trimmer, PreviewState state)
