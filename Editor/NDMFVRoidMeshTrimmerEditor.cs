@@ -70,7 +70,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         DrawTopBar(trimmer, state);
 
         EditorGUI.BeginChangeCheck();
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("enabled"), new GUIContent(T("有効", "Enabled")));
+        DrawBuildTargetEnables(trimmer);
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField(T("基本設定", "Basic Settings"), EditorStyles.boldLabel);
@@ -107,6 +107,46 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         serializedObject.ApplyModifiedProperties();
 
         TryFlushPreviewUpdate(trimmer, state);
+    }
+
+    private void DrawBuildTargetEnables(NDMFVRoidMeshTrimmer trimmer)
+    {
+        EditorGUILayout.LabelField(T("有効ビルドターゲット", "Enabled Build Targets"), EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(serializedObject.FindProperty("enableForWindows"), new GUIContent("Windows"));
+        EditorGUILayout.PropertyField(serializedObject.FindProperty("enableForAndroid"), new GUIContent("Android"));
+        EditorGUILayout.PropertyField(serializedObject.FindProperty("enableForiOS"), new GUIContent("iOS"));
+
+        if (!trimmer.enableForWindows && !trimmer.enableForAndroid && !trimmer.enableForiOS)
+        {
+            EditorGUILayout.HelpBox(T("すべてのビルドターゲットで無効です。", "All build targets are disabled."), MessageType.Warning);
+        }
+
+        if (HasOverlappingTargetEnabledInHierarchy(trimmer))
+        {
+            EditorGUILayout.HelpBox(
+                T("同一アバター内で同じビルドターゲット向けに複数のTrimmerが有効です。重複適用に注意してください。",
+                  "Multiple Trimmers are enabled for the same build target in this avatar. Check for accidental overlap."),
+                MessageType.Warning);
+        }
+    }
+
+    private static bool HasOverlappingTargetEnabledInHierarchy(NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (trimmer == null || trimmer.transform == null) return false;
+        var root = trimmer.transform.root;
+        if (root == null) return false;
+        var trimmers = root.GetComponentsInChildren<NDMFVRoidMeshTrimmer>(true);
+        foreach (var other in trimmers)
+        {
+            if (other == null || other == trimmer) continue;
+            if ((trimmer.enableForWindows && other.enableForWindows) ||
+                (trimmer.enableForAndroid && other.enableForAndroid) ||
+                (trimmer.enableForiOS && other.enableForiOS))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void DrawAdvancedSection(NDMFVRoidMeshTrimmer trimmer)
@@ -571,10 +611,26 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
             NDMFVRoidMeshTrimmerEditor.ClearAllPreviews();
             foreach (var trimmer in trimmers)
             {
-                if (trimmer == null || !trimmer.enabled) continue;
+                if (trimmer == null || !IsEnabledForCurrentBuildTarget(trimmer)) continue;
                 MeshTrimProcessor.ApplyTrim(trimmer, true);
                 TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
             }
         });
+    }
+
+    private static bool IsEnabledForCurrentBuildTarget(NDMFVRoidMeshTrimmer trimmer)
+    {
+        switch (EditorUserBuildSettings.activeBuildTarget)
+        {
+            case BuildTarget.StandaloneWindows:
+            case BuildTarget.StandaloneWindows64:
+                return trimmer.enableForWindows;
+            case BuildTarget.Android:
+                return trimmer.enableForAndroid;
+            case BuildTarget.iOS:
+                return trimmer.enableForiOS;
+            default:
+                return false;
+        }
     }
 }

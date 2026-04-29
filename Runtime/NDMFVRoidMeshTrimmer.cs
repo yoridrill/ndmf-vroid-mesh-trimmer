@@ -40,7 +40,9 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour
         public Material[] originalSharedMaterials;
     }
 
-    public bool enabled = true;
+    public bool enableForWindows = false;
+    public bool enableForAndroid = true;
+    public bool enableForiOS = true;
     public List<TextureTargetSettings> targets = new List<TextureTargetSettings>();
 
     [Range(0f, 1f)] public float alphaThreshold = 0.5f;

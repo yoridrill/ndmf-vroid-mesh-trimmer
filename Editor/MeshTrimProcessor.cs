@@ -49,9 +49,9 @@ public static class MeshTrimProcessor
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer, bool preserveBlendShapes)
     {
-        if (trimmer == null || !trimmer.enabled)
+        if (trimmer == null)
         {
-            Debug.Log("[NDMF VRoid Mesh Trimmer] Trimmer is disabled. Skip.");
+            Debug.Log("[NDMF VRoid Mesh Trimmer] Trimmer is null. Skip.");
             return;
         }
 
