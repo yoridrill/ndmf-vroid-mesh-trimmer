@@ -581,7 +581,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         EditorUtility.SetDirty(trimmer);
     }
 
-    private static void EnsureAutoDetectedTargets(NDMFVRoidMeshTrimmer trimmer, bool forceRefresh)
+    internal static void EnsureAutoDetectedTargets(NDMFVRoidMeshTrimmer trimmer, bool forceRefresh)
     {
         if (trimmer == null) return;
         if (forceRefresh || trimmer.targets == null || trimmer.targets.Count == 0) AutoDetectTargets(trimmer);
@@ -634,7 +634,7 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
             foreach (var trimmer in trimmers)
             {
                 if (trimmer == null || !IsEnabledForCurrentBuildTarget(trimmer)) continue;
-                EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
+                NDMFVRoidMeshTrimmerEditor.EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
                 MeshTrimProcessor.ApplyTrim(trimmer, true);
                 TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
             }
