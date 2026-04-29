@@ -46,6 +46,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     private UiLanguage _language;
     private string _lastFocusedControl;
     private bool _advancedFoldout;
+    private int _lastHotControl;
 
     private void OnEnable()
     {
@@ -169,11 +170,14 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         }
         _lastFocusedControl = currentFocus;
 
+        bool hotControlReleasedCommit = _lastHotControl != 0 && GUIUtility.hotControl == 0;
+        _lastHotControl = GUIUtility.hotControl;
+
         bool enterCommit = (e.type == EventType.KeyDown || e.type == EventType.KeyUp)
                            && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter || e.character == '\n' || e.character == '\r');
         bool commandEnterCommit = (e.type == EventType.ExecuteCommand || e.type == EventType.ValidateCommand)
                                   && (e.commandName == "Newline" || e.commandName == "SoftReturn");
-        bool commit = e.type == EventType.MouseUp || enterCommit || commandEnterCommit || focusLostCommit;
+        bool commit = e.type == EventType.MouseUp || enterCommit || commandEnterCommit || focusLostCommit || hotControlReleasedCommit;
         if (!commit) return;
 
         RequestBuildPreview(trimmer, state, state.pending);
