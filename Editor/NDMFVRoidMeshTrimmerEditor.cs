@@ -224,11 +224,11 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     {
         switch (name)
         {
-            case "alphaThreshold": return T("アルファ閾値", "Alpha Threshold");
-            case "maskDilatePixels": return T("マスク膨張ピクセル", "Mask Dilate Pixels");
-            case "maskClosePixels": return T("マスクCloseピクセル", "Mask Close Pixels");
-            case "fillSmallHolesPixels": return T("小穴埋め面積", "Fill Small Holes Pixels");
-            case "removeSmallIslandsPixels": return T("小島削除面積", "Remove Small Islands Pixels");
+            case "alphaThreshold": return T("アルファしきい値", "Alpha Threshold");
+            case "maskDilatePixels": return T("ベース拡張 (px)", "Base Expansion (px)");
+            case "maskClosePixels": return T("細い隙間を無視 (px)", "Ignore Thin Gaps (px)");
+            case "fillSmallHolesPixels": return T("透明穴下限サイズ (px)", "Min Transparent Hole Size (px)");
+            case "removeSmallIslandsPixels": return T("ゴミ判定サイズ (px)", "Noise Threshold Size (px)");
             case "minIntersectionT": return T("最小交点t", "Min Intersection t");
             case "maxIntersectionT": return T("最大交点t", "Max Intersection t");
             case "minTriangleUvArea": return T("最小UV三角形面積", "Min Triangle UV Area");
@@ -241,6 +241,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     {
         EditorGUILayout.LabelField(T("テクスチャ対象", "Texture Targets"), EditorStyles.boldLabel);
         const float previewSize = 64f;
+        const float compactLabelWidth = 90f;
 
         for (int i = 0; i < targetsProp.arraySize; i++)
         {
@@ -263,14 +264,26 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
             EditorGUILayout.BeginVertical();
             EditorGUILayout.LabelField($"{textureName} ({T("使用箇所", "Usages")}: {usagesProp.arraySize})", EditorStyles.boldLabel);
-            EditorGUILayout.LabelField(T("マテリアル", "Materials"), materialNames);
+            var materialsLabel = new GUIContent(T("マテリアル", "Materials"), materialNames);
+            EditorGUILayout.LabelField(materialsLabel, new GUIContent(materialNames));
 
             EditorGUI.BeginChangeCheck();
-            modeProp.enumValueIndex = (int)(NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(T("Fill Mode", "Fill Mode"), (NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex);
-            if ((NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex == NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor)
+            float prevLabelWidth = EditorGUIUtility.labelWidth;
+            EditorGUIUtility.labelWidth = compactLabelWidth;
+            var mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex;
+            if (mode == NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor)
             {
-                EditorGUILayout.PropertyField(fillColorProp, new GUIContent(T("塗り色", "Fill Color")));
+                EditorGUILayout.BeginHorizontal();
+                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(T("Fill Mode", "Fill Mode"), mode, GUILayout.MaxWidth(220f));
+                EditorGUILayout.PropertyField(fillColorProp, GUIContent.none, GUILayout.MaxWidth(120f));
+                EditorGUILayout.EndHorizontal();
             }
+            else
+            {
+                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(T("Fill Mode", "Fill Mode"), mode);
+            }
+            modeProp.enumValueIndex = (int)mode;
+            EditorGUIUtility.labelWidth = prevLabelWidth;
             if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.TextureOnly);
 
             EditorGUILayout.EndVertical();
