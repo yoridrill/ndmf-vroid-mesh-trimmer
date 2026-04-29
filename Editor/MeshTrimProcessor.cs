@@ -5,6 +5,20 @@ using UnityEngine.Rendering;
 
 public static class MeshTrimProcessor
 {
+    public enum VertexSourceKind
+    {
+        OriginalVertex,
+        EdgeLerp
+    }
+
+    public struct VertexSource
+    {
+        public VertexSourceKind kind;
+        public int indexA;
+        public int indexB;
+        public float t;
+    }
+
     private class SubMeshTask
     {
         public AlphaMaskProcessor.AlphaMaskData maskData;
@@ -29,6 +43,11 @@ public static class MeshTrimProcessor
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
+    {
+        ApplyTrim(trimmer, true);
+    }
+
+    public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer, bool preserveBlendShapes)
     {
         if (trimmer == null || !trimmer.enabled)
         {
@@ -78,24 +97,20 @@ public static class MeshTrimProcessor
 
         foreach (var kv in tasksByRenderer)
         {
-            ProcessRenderer(kv.Key, kv.Value, trimmer);
+            ProcessRenderer(kv.Key, kv.Value, trimmer, preserveBlendShapes);
         }
     }
 
     private static void ProcessRenderer(
         SkinnedMeshRenderer renderer,
         Dictionary<int, SubMeshTask> tasks,
-        NDMFVRoidMeshTrimmer trimmer)
+        NDMFVRoidMeshTrimmer trimmer,
+        bool preserveBlendShapes)
     {
         Mesh src = renderer.sharedMesh;
         if (src == null)
         {
             return;
-        }
-
-        if (src.blendShapeCount > 0)
-        {
-            Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] BlendShape is not supported yet. Renderer={renderer.name}, Mesh={src.name}, BlendShapes={src.blendShapeCount}");
         }
 
         var vertices = new List<Vector3>(src.vertices);
@@ -107,6 +122,17 @@ public static class MeshTrimProcessor
         var uv4 = new List<Vector2>(src.uv4);
         var colors = new List<Color>(src.colors);
         var boneWeights = new List<BoneWeight>(src.boneWeights);
+        var vertexSources = new List<VertexSource>(vertices.Count);
+        for (int v = 0; v < vertices.Count; v++)
+        {
+            vertexSources.Add(new VertexSource
+            {
+                kind = VertexSourceKind.OriginalVertex,
+                indexA = v,
+                indexB = -1,
+                t = 0f
+            });
+        }
 
         bool hasNormals = normals.Count == vertices.Count;
         bool hasTangents = tangents.Count == vertices.Count;
@@ -157,6 +183,7 @@ public static class MeshTrimProcessor
                 hasUv4,
                 hasColors,
                 hasBoneWeights,
+                vertexSources,
                 newSubMeshIndices[sub]);
 
             stats.addedVertices = vertices.Count - baseVertexCount;
@@ -194,8 +221,13 @@ public static class MeshTrimProcessor
             dst.SetTriangles(newSubMeshIndices[sub], sub, true);
         }
 
+        float[] savedBlendShapeWeights = SaveBlendShapeWeights(renderer, src);
+        string[] savedBlendShapeNames = SaveBlendShapeNames(src);
+        CopyBlendShapes(src, dst, vertexSources, renderer.name, preserveBlendShapes);
+
         dst.RecalculateBounds();
         renderer.sharedMesh = dst;
+        RestoreBlendShapeWeights(renderer, dst, savedBlendShapeNames, savedBlendShapeWeights);
     }
 
     private static TrimStats ProcessSubMesh(
@@ -218,6 +250,7 @@ public static class MeshTrimProcessor
         bool hasUv4,
         bool hasColors,
         bool hasBoneWeights,
+        List<VertexSource> vertexSources,
         List<int> dstIndices)
     {
         TrimStats stats = new TrimStats();
@@ -330,10 +363,12 @@ public static class MeshTrimProcessor
                 if (!TryCreateIntersectionFromInsideSegment(maskData, trimmer, edgeA1, edgeB1, 0.5f, 1f,
                         vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                         hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                        vertexSources,
                         ref stats, out int cutA)
                     || !TryCreateIntersectionFromInsideSegment(maskData, trimmer, edgeA2, edgeB2, 0.5f, 1f,
                         vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                         hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                        vertexSources,
                         ref stats, out int cutB))
                 {
                     AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
@@ -373,11 +408,13 @@ public static class MeshTrimProcessor
                 int cutA = GetOrCreateIntersection(insideV, outA, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                    vertexSources,
                     cache, ref stats);
 
                 int cutB = GetOrCreateIntersection(insideV, outB, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                    vertexSources,
                     cache, ref stats);
 
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, insideV, cutA, cutB, vertices, uv, trimmer, ref stats);
@@ -406,11 +443,13 @@ public static class MeshTrimProcessor
                 int cutA = GetOrCreateIntersection(inA, outsideV, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                    vertexSources,
                     cache, ref stats);
 
                 int cutB = GetOrCreateIntersection(inB, outsideV, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                    vertexSources,
                     cache, ref stats);
 
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, inA, inB, cutA, vertices, uv, trimmer, ref stats);
@@ -443,6 +482,7 @@ public static class MeshTrimProcessor
         bool hasUv4,
         bool hasColors,
         bool hasBoneWeights,
+        List<VertexSource> vertexSources,
         EdgeIntersectionCache cache,
         ref TrimStats stats)
     {
@@ -485,19 +525,9 @@ public static class MeshTrimProcessor
             return outsideIndex;
         }
 
-        int newIndex = vertices.Count;
-        vertices.Add(MeshAttributeInterpolator.Lerp(vertices[insideIndex], vertices[outsideIndex], t));
-        if (hasNormals) normals.Add(MeshAttributeInterpolator.Lerp(normals[insideIndex], normals[outsideIndex], t).normalized);
-        if (hasTangents) tangents.Add(MeshAttributeInterpolator.Lerp(tangents[insideIndex], tangents[outsideIndex], t));
-        uv.Add(MeshAttributeInterpolator.Lerp(uv[insideIndex], uv[outsideIndex], t));
-        if (hasUv2) uv2.Add(MeshAttributeInterpolator.Lerp(uv2[insideIndex], uv2[outsideIndex], t));
-        if (hasUv3) uv3.Add(MeshAttributeInterpolator.Lerp(uv3[insideIndex], uv3[outsideIndex], t));
-        if (hasUv4) uv4.Add(MeshAttributeInterpolator.Lerp(uv4[insideIndex], uv4[outsideIndex], t));
-        if (hasColors) colors.Add(MeshAttributeInterpolator.Lerp(colors[insideIndex], colors[outsideIndex], t));
-        if (hasBoneWeights) boneWeights.Add(MeshAttributeInterpolator.Lerp(boneWeights[insideIndex], boneWeights[outsideIndex], t));
-
+        int newIndex = AddInterpolatedVertex(insideIndex, outsideIndex, t, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
         cache.Set(insideIndex, outsideIndex, newIndex);
-        stats.intersections++;
         return newIndex;
     }
 
@@ -524,6 +554,7 @@ public static class MeshTrimProcessor
         bool hasUv4,
         bool hasColors,
         bool hasBoneWeights,
+        List<VertexSource> vertexSources,
         ref TrimStats stats,
         out int index)
     {
@@ -566,7 +597,7 @@ public static class MeshTrimProcessor
         float clampedLocal = localT <= trimmer.minIntersectionT ? 0f : localT;
         float globalT = Mathf.LerpUnclamped(insideT, outsideT, clampedLocal);
         index = AddInterpolatedVertex(edgeA, edgeB, globalT, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, ref stats);
+            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
         return true;
     }
 
@@ -590,6 +621,7 @@ public static class MeshTrimProcessor
         bool hasUv4,
         bool hasColors,
         bool hasBoneWeights,
+        List<VertexSource> vertexSources,
         ref TrimStats stats)
     {
         int newIndex = vertices.Count;
@@ -602,8 +634,132 @@ public static class MeshTrimProcessor
         if (hasUv4) uv4.Add(MeshAttributeInterpolator.Lerp(uv4[a], uv4[b], t));
         if (hasColors) colors.Add(MeshAttributeInterpolator.Lerp(colors[a], colors[b], t));
         if (hasBoneWeights) boneWeights.Add(MeshAttributeInterpolator.Lerp(boneWeights[a], boneWeights[b], t));
+        vertexSources.Add(new VertexSource
+        {
+            kind = VertexSourceKind.EdgeLerp,
+            indexA = a,
+            indexB = b,
+            t = t
+        });
         stats.intersections++;
         return newIndex;
+    }
+
+    private static void CopyBlendShapes(
+        Mesh sourceMesh,
+        Mesh newMesh,
+        List<VertexSource> vertexSources,
+        string rendererName,
+        bool preserveBlendShapes)
+    {
+        if (!preserveBlendShapes || sourceMesh.blendShapeCount == 0)
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={rendererName}, Preserve BlendShapes={preserveBlendShapes}, BlendShapeCount=0, TotalFrameCount=0, ProcessedDeltaVertexCount=0, ElapsedMs=0");
+            return;
+        }
+
+        if (vertexSources.Count != newMesh.vertexCount)
+        {
+            Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] Vertex source count mismatch. vertexSources={vertexSources.Count}, newVertexCount={newMesh.vertexCount}");
+            return;
+        }
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        int sourceVertexCount = sourceMesh.vertexCount;
+        int newVertexCount = newMesh.vertexCount;
+        int totalFrames = 0;
+
+        Vector3[] oldDeltaVertices = new Vector3[sourceVertexCount];
+        Vector3[] oldDeltaNormals = new Vector3[sourceVertexCount];
+        Vector3[] oldDeltaTangents = new Vector3[sourceVertexCount];
+        Vector3[] newDeltaVertices = new Vector3[newVertexCount];
+        Vector3[] newDeltaNormals = new Vector3[newVertexCount];
+        Vector3[] newDeltaTangents = new Vector3[newVertexCount];
+
+        for (int shapeIndex = 0; shapeIndex < sourceMesh.blendShapeCount; shapeIndex++)
+        {
+            string shapeName = sourceMesh.GetBlendShapeName(shapeIndex);
+            int frameCount = sourceMesh.GetBlendShapeFrameCount(shapeIndex);
+
+            for (int frameIndex = 0; frameIndex < frameCount; frameIndex++)
+            {
+                totalFrames++;
+                float weight = sourceMesh.GetBlendShapeFrameWeight(shapeIndex, frameIndex);
+                sourceMesh.GetBlendShapeFrameVertices(shapeIndex, frameIndex, oldDeltaVertices, oldDeltaNormals, oldDeltaTangents);
+
+                for (int i = 0; i < newVertexCount; i++)
+                {
+                    VertexSource src = vertexSources[i];
+                    if (src.kind == VertexSourceKind.OriginalVertex)
+                    {
+                        newDeltaVertices[i] = oldDeltaVertices[src.indexA];
+                        newDeltaNormals[i] = oldDeltaNormals[src.indexA];
+                        newDeltaTangents[i] = oldDeltaTangents[src.indexA];
+                    }
+                    else
+                    {
+                        float t = src.t;
+                        int a = src.indexA;
+                        int b = src.indexB;
+                        newDeltaVertices[i] = Vector3.LerpUnclamped(oldDeltaVertices[a], oldDeltaVertices[b], t);
+                        newDeltaNormals[i] = Vector3.LerpUnclamped(oldDeltaNormals[a], oldDeltaNormals[b], t);
+                        newDeltaTangents[i] = Vector3.LerpUnclamped(oldDeltaTangents[a], oldDeltaTangents[b], t);
+                    }
+                }
+
+                newMesh.AddBlendShapeFrame(shapeName, weight, newDeltaVertices, newDeltaNormals, newDeltaTangents);
+            }
+        }
+
+        sw.Stop();
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={rendererName}, Preserve BlendShapes={preserveBlendShapes}, BlendShapeCount={sourceMesh.blendShapeCount}, TotalFrameCount={totalFrames}, ProcessedDeltaVertexCount={newVertexCount}, ElapsedMs={sw.ElapsedMilliseconds}");
+    }
+
+    private static float[] SaveBlendShapeWeights(SkinnedMeshRenderer renderer, Mesh sourceMesh)
+    {
+        int count = sourceMesh != null ? sourceMesh.blendShapeCount : 0;
+        float[] weights = new float[count];
+        for (int i = 0; i < count; i++)
+        {
+            weights[i] = renderer.GetBlendShapeWeight(i);
+        }
+
+        return weights;
+    }
+
+    private static string[] SaveBlendShapeNames(Mesh sourceMesh)
+    {
+        int count = sourceMesh != null ? sourceMesh.blendShapeCount : 0;
+        string[] names = new string[count];
+        for (int i = 0; i < count; i++)
+        {
+            names[i] = sourceMesh.GetBlendShapeName(i);
+        }
+
+        return names;
+    }
+
+    private static void RestoreBlendShapeWeights(SkinnedMeshRenderer renderer, Mesh newMesh, string[] names, float[] weights)
+    {
+        if (renderer == null || newMesh == null || names == null || weights == null)
+        {
+            return;
+        }
+
+        int count = Mathf.Min(names.Length, weights.Length);
+        for (int i = 0; i < count; i++)
+        {
+            int newIndex = newMesh.GetBlendShapeIndex(names[i]);
+            if (newIndex < 0 && i < newMesh.blendShapeCount)
+            {
+                newIndex = i;
+            }
+
+            if (newIndex >= 0 && newIndex < newMesh.blendShapeCount)
+            {
+                renderer.SetBlendShapeWeight(newIndex, weights[i]);
+            }
+        }
     }
 
     private static void AddTrianglePreserveWinding(
