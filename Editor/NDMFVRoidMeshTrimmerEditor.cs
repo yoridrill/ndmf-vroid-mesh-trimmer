@@ -37,6 +37,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         public bool active;
         public PreviewUpdateType pending;
         public bool processing;
+        public bool queued;
     }
 
     private static readonly Dictionary<int, PreviewState> PreviewByInstanceId = new Dictionary<int, PreviewState>();
@@ -133,7 +134,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         if (GUILayout.Button("Preview", GUILayout.Width(100f)))
         {
             if (state.active) ClearPreview(trimmer);
-            else BuildPreview(trimmer, state, PreviewUpdateType.MeshAndTexture);
+            else RequestBuildPreview(trimmer, state, PreviewUpdateType.MeshAndTexture);
         }
         if (state.processing)
         {
@@ -175,7 +176,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         bool commit = e.type == EventType.MouseUp || enterCommit || commandEnterCommit || focusLostCommit;
         if (!commit) return;
 
-        BuildPreview(trimmer, state, state.pending);
+        RequestBuildPreview(trimmer, state, state.pending);
         state.pending = PreviewUpdateType.None;
     }
 
@@ -259,11 +260,26 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         return state;
     }
 
+    private static void RequestBuildPreview(NDMFVRoidMeshTrimmer trimmer, PreviewState state, PreviewUpdateType type)
+    {
+        if (trimmer == null || state.queued || state.processing) return;
+        state.queued = true;
+        state.processing = true;
+        EditorUtility.SetDirty(trimmer);
+        UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+        EditorApplication.delayCall += () =>
+        {
+            state.queued = false;
+            if (trimmer == null) return;
+
+            BuildPreview(trimmer, state, type);
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+        };
+    }
+
     private static void BuildPreview(NDMFVRoidMeshTrimmer trimmer, PreviewState state, PreviewUpdateType type)
     {
         if (trimmer == null) return;
-        state.processing = true;
-        EditorUtility.SetDirty(trimmer);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
