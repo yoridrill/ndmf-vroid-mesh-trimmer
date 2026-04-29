@@ -161,7 +161,15 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     private void TryFlushPreviewUpdate(NDMFVRoidMeshTrimmer trimmer, PreviewState state)
     {
         if (!state.active || state.pending == PreviewUpdateType.None) return;
-        var e = Event.current;
+        bool commit = IsPreviewCommitEvent(Event.current);
+        if (!commit) return;
+
+        RequestBuildPreview(trimmer, state, state.pending);
+        state.pending = PreviewUpdateType.None;
+    }
+
+    private bool IsPreviewCommitEvent(Event e)
+    {
         bool focusLostCommit = false;
         string currentFocus = GUI.GetNameOfFocusedControl();
         if (!string.IsNullOrEmpty(_lastFocusedControl) && string.IsNullOrEmpty(currentFocus))
@@ -177,11 +185,8 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
                            && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter || e.character == '\n' || e.character == '\r');
         bool commandEnterCommit = (e.type == EventType.ExecuteCommand || e.type == EventType.ValidateCommand)
                                   && (e.commandName == "Newline" || e.commandName == "SoftReturn");
-        bool commit = e.type == EventType.MouseUp || enterCommit || commandEnterCommit || focusLostCommit || hotControlReleasedCommit;
-        if (!commit) return;
 
-        RequestBuildPreview(trimmer, state, state.pending);
-        state.pending = PreviewUpdateType.None;
+        return e.type == EventType.MouseUp || enterCommit || commandEnterCommit || focusLostCommit || hotControlReleasedCommit;
     }
 
     private void DrawSetting(string name) => EditorGUILayout.PropertyField(serializedObject.FindProperty(name), new GUIContent(GetSettingLabel(name)));
@@ -299,27 +304,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
             if (type == PreviewUpdateType.MeshOnly || type == PreviewUpdateType.MeshAndTexture)
             {
-                foreach (var kv in state.rendererStates)
-                {
-                    var r = kv.Value;
-                    if (r.renderer == null || r.originalSharedMesh == null) continue;
-                    r.renderer.sharedMesh = r.originalSharedMesh;
-                }
-
-                MeshTrimProcessor.ApplyTrim(trimmer, false);
-                foreach (var kv in state.rendererStates)
-                {
-                    var r = kv.Value;
-                    if (r.renderer == null) continue;
-                    r.previewMesh = r.renderer.sharedMesh;
-                    if (r.previewMesh != null)
-                    {
-                        r.previewMesh.name = r.originalSharedMesh.name + " (NDMF VRoid Mesh Trimmer Preview)";
-                        r.previewMesh.hideFlags = HideFlags.HideAndDontSave;
-                        r.previewMesh.MarkDynamic();
-                        meshCount++;
-                    }
-                }
+                meshCount = RebuildPreviewMeshes(trimmer, state);
             }
 
             if (type == PreviewUpdateType.TextureOnly || type == PreviewUpdateType.MeshAndTexture)
@@ -337,6 +322,33 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         {
             state.processing = false;
         }
+    }
+
+    private static int RebuildPreviewMeshes(NDMFVRoidMeshTrimmer trimmer, PreviewState state)
+    {
+        int meshCount = 0;
+        foreach (var kv in state.rendererStates)
+        {
+            var r = kv.Value;
+            if (r.renderer == null || r.originalSharedMesh == null) continue;
+            r.renderer.sharedMesh = r.originalSharedMesh;
+        }
+
+        MeshTrimProcessor.ApplyTrim(trimmer, false);
+        foreach (var kv in state.rendererStates)
+        {
+            var r = kv.Value;
+            if (r.renderer == null) continue;
+            r.previewMesh = r.renderer.sharedMesh;
+            if (r.previewMesh == null) continue;
+
+            r.previewMesh.name = r.originalSharedMesh.name + " (NDMF VRoid Mesh Trimmer Preview)";
+            r.previewMesh.hideFlags = HideFlags.HideAndDontSave;
+            r.previewMesh.MarkDynamic();
+            meshCount++;
+        }
+
+        return meshCount;
     }
 
     private static void CaptureOriginals(NDMFVRoidMeshTrimmer trimmer, PreviewState state)
