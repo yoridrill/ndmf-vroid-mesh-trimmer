@@ -43,6 +43,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     private readonly Dictionary<int, bool> _foldouts = new Dictionary<int, bool>();
     private UiLanguage _language;
     private string _lastFocusedControl;
+    private bool _advancedFoldout;
 
     private void OnEnable()
     {
@@ -58,13 +59,9 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         var trimmer = (NDMFVRoidMeshTrimmer)target;
         var state = GetPreviewState(trimmer);
 
-        if (trimmer.PreviewActiveSerialized)
+        if (trimmer.PreviewActiveSerialized && !state.active)
         {
             EditorGUILayout.HelpBox(T("前回のPreview状態が残っています。復旧してください。", "Preview state was left over. Please restore originals."), MessageType.Warning);
-            if (GUILayout.Button(T("Restore Originals", "Restore Originals")))
-            {
-                RestoreOriginalsFromRecovery(trimmer);
-            }
         }
 
         DrawTopBar(trimmer, state);
@@ -103,9 +100,28 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         }
 
         DrawTargets(serializedObject.FindProperty("targets"), state);
+        DrawAdvancedSection(trimmer);
         serializedObject.ApplyModifiedProperties();
 
         TryFlushPreviewUpdate(trimmer, state);
+    }
+
+    private void DrawAdvancedSection(NDMFVRoidMeshTrimmer trimmer)
+    {
+        EditorGUILayout.Space();
+        _advancedFoldout = EditorGUILayout.Foldout(_advancedFoldout, "Advanced", true);
+        if (!_advancedFoldout)
+        {
+            return;
+        }
+
+        EditorGUI.indentLevel++;
+        EditorGUILayout.HelpBox(T("Preview復旧用: 元参照へ戻します。", "Preview recovery: restore original renderer references."), MessageType.None);
+        if (GUILayout.Button(T("Restore Originals", "Restore Originals")))
+        {
+            RestoreOriginalsFromRecovery(trimmer);
+        }
+        EditorGUI.indentLevel--;
     }
 
     private void DrawTopBar(NDMFVRoidMeshTrimmer trimmer, PreviewState state)
