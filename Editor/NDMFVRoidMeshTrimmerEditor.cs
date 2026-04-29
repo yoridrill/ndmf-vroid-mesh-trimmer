@@ -481,6 +481,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
                 if (toonStandardShader != null)
                 {
                     pm.shader = toonStandardShader;
+                    CopyKnownCullModeProperties(m, pm);
                 }
                 pm.SetTexture(prop, previewTex);
                 mats[i] = pm;
@@ -503,11 +504,11 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
     private static Shader FindToonStandardShaderForPreview()
     {
-        // Prefer VRChat mobile Toon Standard if available, then fallback to generic ToonStandard naming.
+        // Prefer VRChat mobile Toon Standard, fallback to Unlit/Texture when unavailable.
         string[] candidates =
         {
             "VRChat/Mobile/Toon Standard",
-            "ToonStandard"
+            "Unlit/Texture"
         };
 
         foreach (var shaderName in candidates)
@@ -518,6 +519,25 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
         return null;
     }
+
+    private static void CopyKnownCullModeProperties(Material source, Material destination)
+    {
+        if (source == null || destination == null) return;
+
+        string[] knownCullProps =
+        {
+            "_MToonCullMode", // MToon10
+            "_CullMode",      // legacy MToon
+            "_Cull"           // lilToon / common
+        };
+
+        foreach (var prop in knownCullProps)
+        {
+            if (!source.HasProperty(prop) || !destination.HasProperty(prop)) continue;
+            destination.SetFloat(prop, source.GetFloat(prop));
+        }
+    }
+
     private static void ClearPreview(NDMFVRoidMeshTrimmer trimmer)
     {
         if (trimmer == null) return;
