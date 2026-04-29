@@ -523,39 +523,24 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     private static void CopyKnownCullModeProperties(Material source, Material destination)
     {
         if (source == null || destination == null) return;
+        if (!destination.HasProperty("_Culling")) return;
 
-        string[] sourceCullProps =
+        // Map known source cull props to Toon Standard _Culling (preview-only).
+        if (source.HasProperty("_MToonCullMode"))
         {
-            "_MToonCullMode", // MToon10
-            "_CullMode",      // legacy MToon
-            "_Cull",          // lilToon / common
-            "_Culling"        // Toon Standard side
-        };
-
-        string[] destinationCullProps =
-        {
-            "_MToonCullMode",
-            "_CullMode",
-            "_Cull",
-            "_Culling"
-        };
-
-        bool hasSourceValue = false;
-        float sourceCullValue = 2f;
-        foreach (var sourceProp in sourceCullProps)
-        {
-            if (!source.HasProperty(sourceProp)) continue;
-            sourceCullValue = source.GetFloat(sourceProp);
-            hasSourceValue = true;
-            break;
+            destination.SetFloat("_Culling", source.GetFloat("_MToonCullMode"));
+            return;
         }
 
-        if (!hasSourceValue) return;
-
-        foreach (var destinationProp in destinationCullProps)
+        if (source.HasProperty("_CullMode"))
         {
-            if (!destination.HasProperty(destinationProp)) continue;
-            destination.SetFloat(destinationProp, sourceCullValue);
+            destination.SetFloat("_Culling", source.GetFloat("_CullMode"));
+            return;
+        }
+
+        if (source.HasProperty("_Cull"))
+        {
+            destination.SetFloat("_Culling", source.GetFloat("_Cull"));
         }
     }
 
