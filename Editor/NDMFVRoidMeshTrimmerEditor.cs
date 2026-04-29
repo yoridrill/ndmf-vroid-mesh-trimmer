@@ -524,17 +524,38 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     {
         if (source == null || destination == null) return;
 
-        string[] knownCullProps =
+        string[] sourceCullProps =
         {
             "_MToonCullMode", // MToon10
             "_CullMode",      // legacy MToon
-            "_Cull"           // lilToon / common
+            "_Cull",          // lilToon / common
+            "_Culling"        // Toon Standard side
         };
 
-        foreach (var prop in knownCullProps)
+        string[] destinationCullProps =
         {
-            if (!source.HasProperty(prop) || !destination.HasProperty(prop)) continue;
-            destination.SetFloat(prop, source.GetFloat(prop));
+            "_MToonCullMode",
+            "_CullMode",
+            "_Cull",
+            "_Culling"
+        };
+
+        bool hasSourceValue = false;
+        float sourceCullValue = 2f;
+        foreach (var sourceProp in sourceCullProps)
+        {
+            if (!source.HasProperty(sourceProp)) continue;
+            sourceCullValue = source.GetFloat(sourceProp);
+            hasSourceValue = true;
+            break;
+        }
+
+        if (!hasSourceValue) return;
+
+        foreach (var destinationProp in destinationCullProps)
+        {
+            if (!destination.HasProperty(destinationProp)) continue;
+            destination.SetFloat(destinationProp, sourceCullValue);
         }
     }
 
