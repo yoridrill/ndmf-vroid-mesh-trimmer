@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-[DisallowMultipleComponent]
 [AddComponentMenu("yoridrill/NDMF VRoid Mesh Trimmer")]
 public class NDMFVRoidMeshTrimmer : MonoBehaviour
 {

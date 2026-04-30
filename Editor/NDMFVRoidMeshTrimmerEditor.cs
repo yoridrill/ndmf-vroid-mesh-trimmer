@@ -38,6 +38,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         public PreviewUpdateType pending;
         public bool processing;
         public bool queued;
+        public bool failed;
     }
 
     private static readonly Dictionary<int, PreviewState> PreviewByInstanceId = new Dictionary<int, PreviewState>();
@@ -162,12 +163,23 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         if (state.active) GUI.backgroundColor = Color.green;
         if (GUILayout.Button("Preview", GUILayout.Width(100f)))
         {
-            if (state.active) ClearPreview(trimmer);
-            else RequestBuildPreview(trimmer, state, PreviewUpdateType.MeshAndTexture);
+            if (state.active)
+            {
+                ClearPreview(trimmer);
+                state.failed = false;
+            }
+            else
+            {
+                state.failed = !RequestBuildPreview(trimmer, state, PreviewUpdateType.MeshAndTexture);
+            }
         }
         if (state.processing)
         {
             EditorGUILayout.LabelField("Processing...", GUILayout.Width(90f));
+        }
+        else if (state.failed)
+        {
+            EditorGUILayout.LabelField("Failed", GUILayout.Width(90f));
         }
         GUI.backgroundColor = oldColor;
 
@@ -192,7 +204,12 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         bool commit = IsPreviewCommitEvent(Event.current);
         if (!commit) return;
 
-        RequestBuildPreview(trimmer, state, state.pending);
+        if (!RequestBuildPreview(trimmer, state, state.pending))
+        {
+            state.failed = true;
+            return;
+        }
+        state.failed = false;
         state.pending = PreviewUpdateType.None;
     }
 
@@ -327,9 +344,10 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         return state;
     }
 
-    private static void RequestBuildPreview(NDMFVRoidMeshTrimmer trimmer, PreviewState state, PreviewUpdateType type)
+    private static bool RequestBuildPreview(NDMFVRoidMeshTrimmer trimmer, PreviewState state, PreviewUpdateType type)
     {
-        if (trimmer == null || state.queued || state.processing) return;
+        if (trimmer == null || state.queued || state.processing) return false;
+        if (IsAnotherPreviewActiveInAvatar(trimmer)) return false;
         EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
         state.queued = true;
         state.processing = true;
@@ -343,6 +361,26 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             BuildPreview(trimmer, state, type);
             UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
         };
+
+        return true;
+    }
+
+
+    private static bool IsAnotherPreviewActiveInAvatar(NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (trimmer == null || trimmer.transform == null) return false;
+        var root = trimmer.transform.root;
+        if (root == null) return false;
+
+        var trimmers = root.GetComponentsInChildren<NDMFVRoidMeshTrimmer>(true);
+        foreach (var other in trimmers)
+        {
+            if (other == null || other == trimmer) continue;
+            var otherState = GetPreviewState(other);
+            if (otherState.active || otherState.processing || otherState.queued) return true;
+        }
+
+        return false;
     }
 
     private static void BuildPreview(NDMFVRoidMeshTrimmer trimmer, PreviewState state, PreviewUpdateType type)
@@ -707,12 +745,19 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
             if (avatarRoot == null) return;
             var trimmers = avatarRoot.GetComponentsInChildren<NDMFVRoidMeshTrimmer>(true);
             NDMFVRoidMeshTrimmerEditor.ClearAllPreviews();
+            bool executedForCurrentPlatform = false;
             foreach (var trimmer in trimmers)
             {
                 if (trimmer == null || !IsEnabledForCurrentBuildTarget(trimmer)) continue;
+                if (executedForCurrentPlatform)
+                {
+                    continue;
+                }
+
                 NDMFVRoidMeshTrimmerEditor.EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
                 MeshTrimProcessor.ApplyTrim(trimmer, true);
                 TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
+                executedForCurrentPlatform = true;
             }
         });
     }
