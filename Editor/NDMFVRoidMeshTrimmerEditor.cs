@@ -266,21 +266,26 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             EditorGUILayout.LabelField($"{textureName} ({T("使用箇所", "Usages")}: {usagesProp.arraySize})", EditorStyles.boldLabel);
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label(T("マテリアル", "Materials"), GUILayout.Width(compactLabelWidth));
-            GUILayout.Label(new GUIContent(materialNames, materialNames), EditorStyles.label);
+            var materialRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.label, GUILayout.ExpandWidth(true));
+            EditorGUI.LabelField(materialRect, new GUIContent(materialNames, materialNames));
             EditorGUILayout.EndHorizontal();
 
             EditorGUI.BeginChangeCheck();
             var mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex;
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label(T("Fill Mode", "Fill Mode"), GUILayout.Width(compactLabelWidth));
+            var controlsRect = GUILayoutUtility.GetRect(0f, EditorGUIUtility.singleLineHeight, GUILayout.ExpandWidth(true));
             if (mode == NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor)
             {
-                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(mode, GUILayout.MaxWidth(160f));
-                EditorGUILayout.PropertyField(fillColorProp, GUIContent.none, GUILayout.MaxWidth(120f));
+                float half = (controlsRect.width - 4f) * 0.5f;
+                var leftRect = new Rect(controlsRect.x, controlsRect.y, half, controlsRect.height);
+                var rightRect = new Rect(controlsRect.x + half + 4f, controlsRect.y, half, controlsRect.height);
+                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUI.EnumPopup(leftRect, mode);
+                EditorGUI.PropertyField(rightRect, fillColorProp, GUIContent.none);
             }
             else
             {
-                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(mode, GUILayout.MaxWidth(240f));
+                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUI.EnumPopup(controlsRect, mode);
             }
             EditorGUILayout.EndHorizontal();
             modeProp.enumValueIndex = (int)mode;
