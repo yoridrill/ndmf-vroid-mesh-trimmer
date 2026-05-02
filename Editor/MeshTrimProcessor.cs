@@ -588,7 +588,7 @@ public static class MeshTrimProcessor
                     {
                         if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2)
                         {
-                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, false, ref stats))
+                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
                             {
                                 bridgeStats.bridgeCutAppliedCount++;
                                 bridgeStats.replacedClippedResultCount++;
@@ -629,7 +629,7 @@ public static class MeshTrimProcessor
                     {
                         if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2)
                         {
-                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, true, ref stats))
+                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
                             {
                                 bridgeStats.bridgeCutAppliedCount++;
                                 bridgeStats.replacedClippedResultCount++;
@@ -842,7 +842,7 @@ public static class MeshTrimProcessor
 
 
     private static bool TryBridgeCutAmbiguousTriangle(int triIndex, int i0, int i1, int i2, List<EdgeCutInfo> edgeCuts, List<int> dstIndices,
-        List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, bool keepSharedCorner, ref TrimStats stats)
+        List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, ref TrimStats stats)
     {
         EdgeCutInfo c01 = default, c12 = default, c20 = default;
         bool h01=false,h12=false,h20=false;
@@ -864,6 +864,16 @@ public static class MeshTrimProcessor
         else if (h12 && h20){cutA=c12.cutPointIndex;cutB=c20.cutPointIndex;shared=i2;other1=i1;other2=i0;}
         else return false;
         if (cutA<0||cutB<0||cutA>=uv.Count||cutB>=uv.Count) return false;
+
+        bool keepSharedCorner = trimmer.bridgeUseNeighborKeptSide;
+        if (!trimmer.bridgeUseNeighborKeptSide)
+        {
+            // mask-based fallback: keep larger side by UV area proxy
+            float sharedArea = Mathf.Abs(SignedArea(uv[shared], uv[cutA], uv[cutB])) * 0.5f;
+            float totalArea = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f;
+            float oppositeArea = Mathf.Max(0f, totalArea - sharedArea);
+            keepSharedCorner = sharedArea >= oppositeArea;
+        }
 
         if (keepSharedCorner)
         {
