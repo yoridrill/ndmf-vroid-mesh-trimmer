@@ -65,6 +65,7 @@ public static class MeshTrimProcessor
         public int ambiguousBridgeCandidates;
         public int smallKeptAreaBridgeCandidates;
         public int smallRemovedAreaBridgeCandidates;
+        public int continuityIssueBridgeCandidates;
         public int bridgeCutAppliedCount;
         public int bridgeCutRejectedCount;
         public int replacedClippedResultCount;
@@ -821,6 +822,7 @@ public static class MeshTrimProcessor
             if (ambiguous) bridgeStats.ambiguousBridgeCandidates++;
             if (smallKept) bridgeStats.smallKeptAreaBridgeCandidates++;
             if (smallRemoved) bridgeStats.smallRemovedAreaBridgeCandidates++;
+            if (hasNeighborCutContinuityIssue) bridgeStats.continuityIssueBridgeCandidates++;
         }
         if (bridgeStats.bridgeCandidatesCount > 0)
         {
@@ -833,7 +835,7 @@ public static class MeshTrimProcessor
         {
             Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] BridgeCut pass1 result count mismatch. TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}");
         }
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}, BridgeCandidatesCount={bridgeStats.bridgeCandidatesCount}, AmbiguousBridgeCandidates={bridgeStats.ambiguousBridgeCandidates}, SmallKeptAreaBridgeCandidates={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemovedAreaBridgeCandidates={bridgeStats.smallRemovedAreaBridgeCandidates}, BridgeCutAppliedCount={bridgeStats.bridgeCutAppliedCount}, BridgeCutRejectedCount={bridgeStats.bridgeCutRejectedCount}, ReplacedClippedResultCount={bridgeStats.replacedClippedResultCount}, KeptSideDecidedByNeighborCount={bridgeStats.keptSideDecidedByNeighborCount}, KeptSideDecidedByMaskCount={bridgeStats.keptSideDecidedByMaskCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}, BridgeCandidatesCount={bridgeStats.bridgeCandidatesCount}, AmbiguousBridgeCandidates={bridgeStats.ambiguousBridgeCandidates}, SmallKeptAreaBridgeCandidates={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemovedAreaBridgeCandidates={bridgeStats.smallRemovedAreaBridgeCandidates}, ContinuityIssueBridgeCandidates={bridgeStats.continuityIssueBridgeCandidates}, BridgeCutAppliedCount={bridgeStats.bridgeCutAppliedCount}, BridgeCutRejectedCount={bridgeStats.bridgeCutRejectedCount}, ReplacedClippedResultCount={bridgeStats.replacedClippedResultCount}, KeptSideDecidedByNeighborCount={bridgeStats.keptSideDecidedByNeighborCount}, KeptSideDecidedByMaskCount={bridgeStats.keptSideDecidedByMaskCount}");
         return stats;
     }
 
