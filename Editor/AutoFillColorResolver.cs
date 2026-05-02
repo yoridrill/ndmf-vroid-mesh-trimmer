@@ -89,6 +89,7 @@ public static class AutoFillColorResolver
     private static void ApplyPreSubdivideRules(FillColorConfig config, List<NDMFVRoidMeshTrimmer.TextureTargetSettings> targets)
     {
         if (config.preSubdivide == null) return;
+        int matched = 0;
         foreach (var target in targets)
         {
             if (target == null || target.usages == null) continue;
@@ -100,9 +101,13 @@ public static class AutoFillColorResolver
                 if (!TryMatchTarget(target, rule.target)) continue;
                 target.enablePreSubdivide = rule.level > 0;
                 target.preSubdivideLevel = Mathf.Clamp(rule.level, 0, 2);
+                matched++;
+                Debug.Log($"[NDMF VRoid Mesh Trimmer] Auto preSubdivide matched. TargetMaterial={GetFirstUsageMaterialName(target)}, Level={target.preSubdivideLevel}");
                 break;
             }
         }
+
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Auto preSubdivide rules processed. RuleCount={config.preSubdivide.Length}, MatchedTargetCount={matched}");
     }
 
     private static bool TryMatchTarget(NDMFVRoidMeshTrimmer.TextureTargetSettings settings, string[] targetCandidates)

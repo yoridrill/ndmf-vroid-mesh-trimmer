@@ -88,16 +88,20 @@ public static class MeshTrimProcessor
                     tasksByRenderer[usage.renderer] = subTasks;
                 }
 
-                subTasks[usage.subMeshIndex] = new SubMeshTask
+                if (!subTasks.TryGetValue(usage.subMeshIndex, out var existingTask))
                 {
-                    maskData = maskData,
-                    texture = target.mainTexture,
-                    enablePreSubdivide = target.enablePreSubdivide,
-                    preSubdivideLevel = target.preSubdivideLevel
-                };
+                    existingTask = new SubMeshTask();
+                    subTasks[usage.subMeshIndex] = existingTask;
+                }
+
+                existingTask.maskData = maskData;
+                existingTask.texture = target.mainTexture;
+                existingTask.enablePreSubdivide = existingTask.enablePreSubdivide || target.enablePreSubdivide;
+                existingTask.preSubdivideLevel = Mathf.Max(existingTask.preSubdivideLevel, target.preSubdivideLevel);
             }
         }
 
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Trim task renderers={tasksByRenderer.Count}");
         foreach (var kv in tasksByRenderer)
         {
             ProcessRenderer(kv.Key, kv.Value, trimmer, preserveBlendShapes);
