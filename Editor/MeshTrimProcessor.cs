@@ -38,6 +38,7 @@ public static class MeshTrimProcessor
 
     private struct TriangleTrimResult
     {
+        public int triangleIndex;
         public TriangleTrimState state;
         public float originalAreaUv;
         public float keptAreaUv;
@@ -602,7 +603,7 @@ public static class MeshTrimProcessor
                 }
 
                 AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                triangleResults.Add(BuildResult(TriangleTrimState.StrongKeep, i0, i1, i2, uv, 0f, 0));
+                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongKeep, i0, i1, i2, uv, 1f, 0));
                 continue;
             }
 
@@ -620,12 +621,12 @@ public static class MeshTrimProcessor
                     {
                         AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
                         stats.centroidOnlyInsidePreserved++;
-                        triangleResults.Add(BuildResult(TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 0));
+                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 0));
                     }
                     else
                     {
                         stats.removedTriangles++;
-                        triangleResults.Add(BuildResult(TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
+                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
                     }
                     continue;
                 }
@@ -636,14 +637,13 @@ public static class MeshTrimProcessor
                     {
                         AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
                         stats.singleEdgeMidpointAndCentroidInsidePreserved++;
-                        triangleResults.Add(BuildResult(TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 1));
+                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 1));
                     }
                     else
                     {
                         stats.removedTriangles++;
-                        triangleResults.Add(BuildResult(TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
                         stats.singleEdgeMidpointInsideDiscarded++;
-                        triangleResults.Add(BuildResult(TriangleTrimState.Ambiguous, i0, i1, i2, uv, 0f, 1));
+                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 0f, 1));
                     }
                     continue;
                 }
@@ -652,7 +652,7 @@ public static class MeshTrimProcessor
                 {
                     AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
                     stats.allEdgeMidpointsInsidePreserved++;
-                    triangleResults.Add(BuildResult(TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 3));
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 3));
                     continue;
                 }
 
@@ -681,7 +681,7 @@ public static class MeshTrimProcessor
                 {
                     AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
                     stats.fallbackPreserved++;
-                    triangleResults.Add(BuildResult(TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 2));
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 2));
                     continue;
                 }
 
@@ -698,7 +698,7 @@ public static class MeshTrimProcessor
                 {
                     AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
                     stats.fallbackPreserved++;
-                    triangleResults.Add(BuildResult(TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 2));
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 2));
                     continue;
                 }
 
@@ -706,7 +706,7 @@ public static class MeshTrimProcessor
                 AddEdgeCut(edgeCuts, triIndex, edgeA2, edgeB2, cutB, uv);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, virtualInside, cutA, cutB, vertices, uv, trimmer, ref stats);
                 stats.twoEdgeMidpointsInsideClipped++;
-                triangleResults.Add(BuildResult(TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
+                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
                 continue;
             }
 
@@ -749,7 +749,7 @@ public static class MeshTrimProcessor
                 AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
                 AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, insideV, cutA, cutB, vertices, uv, trimmer, ref stats);
-                triangleResults.Add(BuildResult(TriangleTrimState.Clipped, i0, i1, i2, uv, 0.33f, 2));
+                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.33f, 2));
             }
             else if (insideCount == 2)
             {
@@ -788,7 +788,7 @@ public static class MeshTrimProcessor
                 AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, inA, inB, cutA, vertices, uv, trimmer, ref stats);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, inB, cutB, cutA, vertices, uv, trimmer, ref stats);
-                triangleResults.Add(BuildResult(TriangleTrimState.Clipped, i0, i1, i2, uv, 0.66f, 2));
+                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.66f, 2));
             }
         }
 
@@ -803,7 +803,7 @@ public static class MeshTrimProcessor
             bool smallKept = r.state == TriangleTrimState.Clipped && r.keptAreaRatio < trimmer.bridgeSmallKeptAreaRatio;
             bool smallRemoved = r.state == TriangleTrimState.Clipped && r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio;
             int cutCount = 0;
-            for (int e = 0; e < edgeCuts.Count; e++) if (edgeCuts[e].triangleIndex == i) cutCount++;
+            for (int e = 0; e < edgeCuts.Count; e++) if (edgeCuts[e].triangleIndex == r.triangleIndex) cutCount++;
             bool hasNeighborCutContinuityIssue = cutCount >= 2 && r.state != TriangleTrimState.Clipped;
             if (ambiguous || smallKept || smallRemoved || hasNeighborCutContinuityIssue) bridgeStats.bridgeCandidatesCount++;
             if (ambiguous) bridgeStats.ambiguousBridgeCandidates++;
@@ -815,11 +815,13 @@ public static class MeshTrimProcessor
             bridgeStats.bridgeCutRejectedCount = bridgeStats.bridgeCandidatesCount;
         }
         }
-        if (triangleResults.Count != bridgeStats.totalTriangles)
+        var uniqueTri = new HashSet<int>();
+        for (int i = 0; i < triangleResults.Count; i++) uniqueTri.Add(triangleResults[i].triangleIndex);
+        if (uniqueTri.Count != bridgeStats.totalTriangles)
         {
-            Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] BridgeCut pass1 result count mismatch. TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}");
+            Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] BridgeCut pass1 result count mismatch. TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}");
         }
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, BridgeCandidatesCount={bridgeStats.bridgeCandidatesCount}, AmbiguousBridgeCandidates={bridgeStats.ambiguousBridgeCandidates}, SmallKeptAreaBridgeCandidates={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemovedAreaBridgeCandidates={bridgeStats.smallRemovedAreaBridgeCandidates}, BridgeCutAppliedCount={bridgeStats.bridgeCutAppliedCount}, BridgeCutRejectedCount={bridgeStats.bridgeCutRejectedCount}, ReplacedClippedResultCount={bridgeStats.replacedClippedResultCount}, KeptSideDecidedByNeighborCount={bridgeStats.keptSideDecidedByNeighborCount}, KeptSideDecidedByMaskCount={bridgeStats.keptSideDecidedByMaskCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}, BridgeCandidatesCount={bridgeStats.bridgeCandidatesCount}, AmbiguousBridgeCandidates={bridgeStats.ambiguousBridgeCandidates}, SmallKeptAreaBridgeCandidates={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemovedAreaBridgeCandidates={bridgeStats.smallRemovedAreaBridgeCandidates}, BridgeCutAppliedCount={bridgeStats.bridgeCutAppliedCount}, BridgeCutRejectedCount={bridgeStats.bridgeCutRejectedCount}, ReplacedClippedResultCount={bridgeStats.replacedClippedResultCount}, KeptSideDecidedByNeighborCount={bridgeStats.keptSideDecidedByNeighborCount}, KeptSideDecidedByMaskCount={bridgeStats.keptSideDecidedByMaskCount}");
         return stats;
     }
 
@@ -842,13 +844,14 @@ public static class MeshTrimProcessor
         });
     }
 
-    private static TriangleTrimResult BuildResult(TriangleTrimState state, int i0, int i1, int i2, List<Vector2> uv, float keptAreaRatio, int cutEdges)
+    private static TriangleTrimResult BuildResult(int triangleIndex, TriangleTrimState state, int i0, int i1, int i2, List<Vector2> uv, float keptAreaRatio, int cutEdges)
     {
         float area = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f;
         float kept = area * Mathf.Clamp01(keptAreaRatio);
         float removed = Mathf.Max(0f, area - kept);
         return new TriangleTrimResult
         {
+            triangleIndex = triangleIndex,
             state = state,
             originalAreaUv = area,
             keptAreaUv = kept,
