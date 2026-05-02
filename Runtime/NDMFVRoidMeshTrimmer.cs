@@ -56,6 +56,11 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour, IEditorOnly
     [Min(0)] public int removeSmallIslandsPixels = 16;
 
     [Range(0f, 1f)] public float minIntersectionT = 0.02f;
+
+    public bool enableBridgeCut = true;
+    [Range(0f, 1f)] public float bridgeSmallKeptAreaRatio = 0.08f;
+    [Range(0f, 1f)] public float bridgeSmallRemovedAreaRatio = 0.03f;
+    public bool bridgeUseNeighborKeptSide = true;
     [Range(0f, 1f)] public float maxIntersectionT = 0.98f;
 
     [Min(0f)] public float minTriangleUvArea = 0.0000001f;

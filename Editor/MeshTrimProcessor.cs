@@ -27,6 +27,47 @@ public static class MeshTrimProcessor
         public bool preSubdivideQuadAware;
     }
 
+
+    private enum TriangleTrimState
+    {
+        StrongKeep,
+        StrongTrim,
+        Clipped,
+        Ambiguous
+    }
+
+    private struct TriangleTrimResult
+    {
+        public TriangleTrimState state;
+        public float originalAreaUv;
+        public float keptAreaUv;
+        public float removedAreaUv;
+        public float keptAreaRatio;
+        public float removedAreaRatio;
+        public int cutEdges;
+    }
+
+    private struct EdgeCutInfo
+    {
+        public long edgeKey;
+        public int triangleIndex;
+        public int cutPointIndex;
+        public Vector2 cutPointUv;
+    }
+
+    private struct BridgeStats
+    {
+        public int bridgeCandidatesCount;
+        public int ambiguousBridgeCandidates;
+        public int smallKeptAreaBridgeCandidates;
+        public int smallRemovedAreaBridgeCandidates;
+        public int bridgeCutAppliedCount;
+        public int bridgeCutRejectedCount;
+        public int replacedClippedResultCount;
+        public int keptSideDecidedByNeighborCount;
+        public int keptSideDecidedByMaskCount;
+    }
+
     private struct TrimStats
     {
         public int originalTriangles;
@@ -523,6 +564,9 @@ public static class MeshTrimProcessor
         List<int> dstIndices)
     {
         TrimStats stats = new TrimStats();
+        BridgeStats bridgeStats = new BridgeStats();
+        var triangleResults = new List<TriangleTrimResult>(srcIndices.Length / 3);
+        var edgeCuts = new List<EdgeCutInfo>();
         EdgeIntersectionCache cache = new EdgeIntersectionCache();
 
         for (int i = 0; i < srcIndices.Length; i += 3)
@@ -554,6 +598,7 @@ public static class MeshTrimProcessor
                 }
 
                 AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                triangleResults.Add(BuildResult(TriangleTrimState.StrongKeep, i0, i1, i2, uv, 0f, 0));
                 continue;
             }
 
@@ -575,6 +620,7 @@ public static class MeshTrimProcessor
                     else
                     {
                         stats.removedTriangles++;
+                        triangleResults.Add(BuildResult(TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
                     }
                     continue;
                 }
@@ -589,6 +635,7 @@ public static class MeshTrimProcessor
                     else
                     {
                         stats.removedTriangles++;
+                        triangleResults.Add(BuildResult(TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
                         stats.singleEdgeMidpointInsideDiscarded++;
                     }
                     continue;
@@ -727,7 +774,41 @@ public static class MeshTrimProcessor
         }
 
         stats.outputTriangles = dstIndices.Count / 3;
+        for (int i = 0; i < triangleResults.Count; i++)
+        {
+            var r = triangleResults[i];
+            bool ambiguous = r.state == TriangleTrimState.Ambiguous;
+            bool smallKept = r.state == TriangleTrimState.Clipped && r.keptAreaRatio < trimmer.bridgeSmallKeptAreaRatio;
+            bool smallRemoved = r.state == TriangleTrimState.Clipped && r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio;
+            if (ambiguous || smallKept || smallRemoved) bridgeStats.bridgeCandidatesCount++;
+            if (ambiguous) bridgeStats.ambiguousBridgeCandidates++;
+            if (smallKept) bridgeStats.smallKeptAreaBridgeCandidates++;
+            if (smallRemoved) bridgeStats.smallRemovedAreaBridgeCandidates++;
+        }
+        if (bridgeStats.bridgeCandidatesCount > 0)
+        {
+            bridgeStats.bridgeCutRejectedCount = bridgeStats.bridgeCandidatesCount;
+        }
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Candidates={bridgeStats.bridgeCandidatesCount}, Ambiguous={bridgeStats.ambiguousBridgeCandidates}, SmallKept={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemoved={bridgeStats.smallRemovedAreaBridgeCandidates}, Applied={bridgeStats.bridgeCutAppliedCount}, Rejected={bridgeStats.bridgeCutRejectedCount}, ReplacedClipped={bridgeStats.replacedClippedResultCount}, DecidedByNeighbor={bridgeStats.keptSideDecidedByNeighborCount}, DecidedByMask={bridgeStats.keptSideDecidedByMaskCount}");
         return stats;
+    }
+
+
+    private static TriangleTrimResult BuildResult(TriangleTrimState state, int i0, int i1, int i2, List<Vector2> uv, float keptAreaRatio, int cutEdges)
+    {
+        float area = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f;
+        float kept = area * Mathf.Clamp01(keptAreaRatio);
+        float removed = Mathf.Max(0f, area - kept);
+        return new TriangleTrimResult
+        {
+            state = state,
+            originalAreaUv = area,
+            keptAreaUv = kept,
+            removedAreaUv = removed,
+            keptAreaRatio = area > 0f ? kept / area : 0f,
+            removedAreaRatio = area > 0f ? removed / area : 0f,
+            cutEdges = cutEdges
+        };
     }
 
     private static int GetOrCreateIntersection(
