@@ -562,7 +562,7 @@ public static class MeshTrimProcessor
             bool centroidIn = AlphaMaskProcessor.SampleMask(maskData, centroid);
 
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
-            int neighborCutEdgeCount = CountNeighborCutEdges(edgeCuts, i0, i1, i2);
+            int neighborCutEdgeCount = CountNeighborCutEdges(edgeCuts, i0, i1, i2, triIndex);
 
             if (insideCount == 3)
             {
@@ -860,7 +860,7 @@ public static class MeshTrimProcessor
                 int ti0 = srcIndices[triBase];
                 int ti1 = srcIndices[triBase + 1];
                 int ti2 = srcIndices[triBase + 2];
-                int neighborCutEdges = CountNeighborCutEdges(edgeCuts, ti0, ti1, ti2);
+                int neighborCutEdges = CountNeighborCutEdges(edgeCuts, ti0, ti1, ti2, r.triangleIndex);
                 // Pass2 appends geometry; avoid applying it to already-clipped triangles or tips become too thick.
                 bool continuityCandidate = trimmer.bridgeUseNeighborKeptSide && neighborCutEdges >= 2 && removedCandidate;
                 if (!removedCandidate && !smallAreaCandidate && !continuityCandidate) continue;
@@ -900,7 +900,7 @@ public static class MeshTrimProcessor
                 int ti0 = srcIndices[triBase];
                 int ti1 = srcIndices[triBase + 1];
                 int ti2 = srcIndices[triBase + 2];
-                cutCount = CountNeighborCutEdges(edgeCuts, ti0, ti1, ti2);
+                cutCount = CountNeighborCutEdges(edgeCuts, ti0, ti1, ti2, r.triangleIndex);
             }
             bool hasTwoCutEdges = cutCount >= 2;
             if (hasTwoCutEdges) bridgeStats.trianglesWithTwoCutEdges++;
@@ -1013,7 +1013,7 @@ public static class MeshTrimProcessor
         return true;
     }
 
-    private static int CountNeighborCutEdges(List<EdgeCutInfo> edgeCuts, int i0, int i1, int i2)
+    private static int CountNeighborCutEdges(List<EdgeCutInfo> edgeCuts, int i0, int i1, int i2, int excludeTriangleIndex = -1)
     {
         if (edgeCuts == null || edgeCuts.Count == 0) return 0;
         long e01 = MakeEdgeKey(i0, i1);
@@ -1022,6 +1022,7 @@ public static class MeshTrimProcessor
         bool h01 = false, h12 = false, h20 = false;
         for (int i = 0; i < edgeCuts.Count; i++)
         {
+            if (edgeCuts[i].triangleIndex == excludeTriangleIndex) continue;
             long k = edgeCuts[i].edgeKey;
             if (k == e01) h01 = true;
             else if (k == e12) h12 = true;
