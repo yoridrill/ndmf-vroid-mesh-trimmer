@@ -828,8 +828,11 @@ public static class MeshTrimProcessor
             for (int i = 0; i < triangleResults.Count; i++)
             {
                 var r = triangleResults[i];
-                if (r.keptAreaRatio > 0f) continue;
-                if (r.state != TriangleTrimState.Ambiguous && r.state != TriangleTrimState.StrongTrim) continue;
+                bool removedCandidate = r.keptAreaRatio <= 0f && (r.state == TriangleTrimState.Ambiguous || r.state == TriangleTrimState.StrongTrim);
+                bool smallAreaCandidate = r.state == TriangleTrimState.Clipped &&
+                                          (r.keptAreaRatio < trimmer.bridgeSmallKeptAreaRatio ||
+                                           r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio);
+                if (!removedCandidate && !smallAreaCandidate) continue;
 
                 int triBase = r.triangleIndex * 3;
                 if (triBase < 0 || triBase + 2 >= srcIndices.Length) continue;
