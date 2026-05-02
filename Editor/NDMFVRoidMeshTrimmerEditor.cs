@@ -38,11 +38,11 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         public PreviewUpdateType pending;
         public bool processing;
         public bool queued;
+        public bool failed;
     }
 
     private static readonly Dictionary<int, PreviewState> PreviewByInstanceId = new Dictionary<int, PreviewState>();
 
-    private readonly Dictionary<int, bool> _foldouts = new Dictionary<int, bool>();
     private UiLanguage _language;
     private string _lastFocusedControl;
     private bool _advancedFoldout;
@@ -70,7 +70,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         DrawTopBar(trimmer, state);
 
         EditorGUI.BeginChangeCheck();
-        EditorGUILayout.PropertyField(serializedObject.FindProperty("enabled"), new GUIContent(T("有効", "Enabled")));
+        DrawBuildTargetEnables(trimmer);
 
         EditorGUILayout.Space();
         EditorGUILayout.LabelField(T("基本設定", "Basic Settings"), EditorStyles.boldLabel);
@@ -79,34 +79,63 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         DrawSetting("maskClosePixels");
         DrawSetting("fillSmallHolesPixels");
         DrawSetting("removeSmallIslandsPixels");
-        DrawSetting("minIntersectionT");
-        DrawSetting("maxIntersectionT");
-        DrawSetting("minTriangleUvArea");
-        DrawSetting("minTriangleWorldArea");
+        EditorGUILayout.PropertyField(serializedObject.FindProperty("enableTexturePadding"), new GUIContent(T("テクスチャの余白を塗り足す", "Pad Texture Transparent Areas")));
 
         if (EditorGUI.EndChangeCheck())
         {
             QueuePreviewUpdate(state, PreviewUpdateType.MeshOnly);
         }
 
-        EditorGUILayout.Space();
-        if (GUILayout.Button(T("対象を自動検出", "Auto Detect Targets")))
+        if (trimmer.enableTexturePadding)
         {
-            bool wasPreview = state.active;
-            if (wasPreview) ClearPreview(trimmer);
-            AutoDetectTargets(trimmer);
-            serializedObject.Update();
-            if (wasPreview)
-            {
-                BuildPreview(trimmer, GetPreviewState(trimmer), PreviewUpdateType.MeshAndTexture);
-            }
+            EnsureAutoDetectedTargets(trimmer, false);
+            DrawTargets(serializedObject.FindProperty("targets"), state);
         }
 
-        DrawTargets(serializedObject.FindProperty("targets"), state);
         DrawAdvancedSection(trimmer);
         serializedObject.ApplyModifiedProperties();
 
         TryFlushPreviewUpdate(trimmer, state);
+    }
+
+    private void DrawBuildTargetEnables(NDMFVRoidMeshTrimmer trimmer)
+    {
+        EditorGUILayout.LabelField(T("有効ビルドターゲット", "Enabled Build Targets"), EditorStyles.boldLabel);
+        EditorGUILayout.PropertyField(serializedObject.FindProperty("enableForWindows"), new GUIContent("Windows"));
+        EditorGUILayout.PropertyField(serializedObject.FindProperty("enableForAndroid"), new GUIContent("Android"));
+        EditorGUILayout.PropertyField(serializedObject.FindProperty("enableForiOS"), new GUIContent("iOS"));
+
+        if (!trimmer.enableForWindows && !trimmer.enableForAndroid && !trimmer.enableForiOS)
+        {
+            EditorGUILayout.HelpBox(T("すべてのビルドターゲットで無効です。", "All build targets are disabled."), MessageType.Warning);
+        }
+
+        if (HasOverlappingTargetEnabledInHierarchy(trimmer))
+        {
+            EditorGUILayout.HelpBox(
+                T("同一アバター内で同じビルドターゲット向けに複数のTrimmerが有効です。重複適用に注意してください。",
+                  "Multiple Trimmers are enabled for the same build target in this avatar. Check for accidental overlap."),
+                MessageType.Warning);
+        }
+    }
+
+    private static bool HasOverlappingTargetEnabledInHierarchy(NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (trimmer == null || trimmer.transform == null) return false;
+        var root = trimmer.transform.root;
+        if (root == null) return false;
+        var trimmers = root.GetComponentsInChildren<NDMFVRoidMeshTrimmer>(true);
+        foreach (var other in trimmers)
+        {
+            if (other == null || other == trimmer) continue;
+            if ((trimmer.enableForWindows && other.enableForWindows) ||
+                (trimmer.enableForAndroid && other.enableForAndroid) ||
+                (trimmer.enableForiOS && other.enableForiOS))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void DrawAdvancedSection(NDMFVRoidMeshTrimmer trimmer)
@@ -134,12 +163,23 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         if (state.active) GUI.backgroundColor = Color.green;
         if (GUILayout.Button("Preview", GUILayout.Width(100f)))
         {
-            if (state.active) ClearPreview(trimmer);
-            else RequestBuildPreview(trimmer, state, PreviewUpdateType.MeshAndTexture);
+            if (state.active)
+            {
+                ClearPreview(trimmer);
+                state.failed = false;
+            }
+            else
+            {
+                state.failed = !RequestBuildPreview(trimmer, state, PreviewUpdateType.MeshAndTexture);
+            }
         }
         if (state.processing)
         {
             EditorGUILayout.LabelField("Processing...", GUILayout.Width(90f));
+        }
+        else if (state.failed)
+        {
+            EditorGUILayout.LabelField("Failed", GUILayout.Width(90f));
         }
         GUI.backgroundColor = oldColor;
 
@@ -164,7 +204,12 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         bool commit = IsPreviewCommitEvent(Event.current);
         if (!commit) return;
 
-        RequestBuildPreview(trimmer, state, state.pending);
+        if (!RequestBuildPreview(trimmer, state, state.pending))
+        {
+            state.failed = true;
+            return;
+        }
+        state.failed = false;
         state.pending = PreviewUpdateType.None;
     }
 
@@ -196,11 +241,11 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     {
         switch (name)
         {
-            case "alphaThreshold": return T("アルファ閾値", "Alpha Threshold");
-            case "maskDilatePixels": return T("マスク膨張ピクセル", "Mask Dilate Pixels");
-            case "maskClosePixels": return T("マスクCloseピクセル", "Mask Close Pixels");
-            case "fillSmallHolesPixels": return T("小穴埋め面積", "Fill Small Holes Pixels");
-            case "removeSmallIslandsPixels": return T("小島削除面積", "Remove Small Islands Pixels");
+            case "alphaThreshold": return T("アルファしきい値", "Alpha Threshold");
+            case "maskDilatePixels": return T("ベース拡張 (px)", "Base Expansion (px)");
+            case "maskClosePixels": return T("細い隙間を無視 (px)", "Ignore Thin Gaps (px)");
+            case "fillSmallHolesPixels": return T("透明穴下限サイズ (px)", "Min Transparent Hole Size (px)");
+            case "removeSmallIslandsPixels": return T("ゴミ判定サイズ (px)", "Noise Threshold Size (px)");
             case "minIntersectionT": return T("最小交点t", "Min Intersection t");
             case "maxIntersectionT": return T("最大交点t", "Max Intersection t");
             case "minTriangleUvArea": return T("最小UV三角形面積", "Min Triangle UV Area");
@@ -212,50 +257,80 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
     private void DrawTargets(SerializedProperty targetsProp, PreviewState state)
     {
         EditorGUILayout.LabelField(T("テクスチャ対象", "Texture Targets"), EditorStyles.boldLabel);
+        const float previewSize = 64f;
+        const float compactLabelWidth = 90f;
+
         for (int i = 0; i < targetsProp.arraySize; i++)
         {
             var targetProp = targetsProp.GetArrayElementAtIndex(i);
-            var enabledProp = targetProp.FindPropertyRelative("enabled");
             var texProp = targetProp.FindPropertyRelative("mainTexture");
-            var fillEnabledProp = targetProp.FindPropertyRelative("enableTextureFill");
             var modeProp = targetProp.FindPropertyRelative("texturePostProcessMode");
             var fillColorProp = targetProp.FindPropertyRelative("fillColor");
             var usagesProp = targetProp.FindPropertyRelative("usages");
 
             Texture2D tex = texProp.objectReferenceValue as Texture2D;
+            string textureName = tex ? tex.name : "(None)";
+            string materialNames = BuildMaterialNamesText(usagesProp);
+
             EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-            EditorGUI.BeginChangeCheck();
-            enabledProp.boolValue = EditorGUILayout.ToggleLeft($"{(tex ? tex.name : "(None)")} ({T("使用箇所", "Usages")}: {usagesProp.arraySize})", enabledProp.boolValue);
-            if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.MeshOnly);
+            EditorGUILayout.BeginHorizontal();
+
+            var previewRect = GUILayoutUtility.GetRect(previewSize, previewSize, GUILayout.Width(previewSize), GUILayout.Height(previewSize));
+            if (tex != null) EditorGUI.DrawPreviewTexture(previewRect, tex, null, ScaleMode.ScaleToFit);
+            else EditorGUI.HelpBox(previewRect, "No Tex", MessageType.None);
+
+            EditorGUILayout.BeginVertical();
+            EditorGUILayout.LabelField($"{textureName} ({T("使用箇所", "Usages")}: {usagesProp.arraySize})", EditorStyles.boldLabel);
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(T("マテリアル", "Materials"), GUILayout.Width(compactLabelWidth));
+            var materialRect = GUILayoutUtility.GetRect(GUIContent.none, EditorStyles.label, GUILayout.ExpandWidth(true));
+            EditorGUI.LabelField(materialRect, new GUIContent(materialNames, materialNames));
+            EditorGUILayout.EndHorizontal();
 
             EditorGUI.BeginChangeCheck();
-            fillEnabledProp.boolValue = EditorGUILayout.ToggleLeft(T("Texture Fillを有効", "Enable Texture Fill"), fillEnabledProp.boolValue);
-            modeProp.enumValueIndex = (int)(NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUILayout.EnumPopup(T("Fill Mode", "Fill Mode"), (NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex);
-            if ((NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex == NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor)
+            var mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex;
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(T("Fill Mode", "Fill Mode"), GUILayout.Width(compactLabelWidth));
+            var controlsRect = GUILayoutUtility.GetRect(0f, EditorGUIUtility.singleLineHeight, GUILayout.ExpandWidth(true));
+            if (mode == NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor)
             {
-                EditorGUILayout.PropertyField(fillColorProp, new GUIContent(T("塗り色", "Fill Color")));
+                float half = (controlsRect.width - 4f) * 0.5f;
+                var leftRect = new Rect(controlsRect.x, controlsRect.y, half, controlsRect.height);
+                var rightRect = new Rect(controlsRect.x + half + 4f, controlsRect.y, half, controlsRect.height);
+                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUI.EnumPopup(leftRect, mode);
+                EditorGUI.PropertyField(rightRect, fillColorProp, GUIContent.none);
             }
+            else
+            {
+                mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUI.EnumPopup(controlsRect, mode);
+            }
+            EditorGUILayout.EndHorizontal();
+            modeProp.enumValueIndex = (int)mode;
             if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.TextureOnly);
 
-            _foldouts.TryGetValue(i, out bool open);
-            open = EditorGUILayout.Foldout(open, T("使用箇所を表示", "Show Usages"), true);
-            _foldouts[i] = open;
-            if (open)
-            {
-                for (int u = 0; u < usagesProp.arraySize; u++)
-                {
-                    var usage = usagesProp.GetArrayElementAtIndex(u);
-                    var rendererProp = usage.FindPropertyRelative("renderer");
-                    var subMeshProp = usage.FindPropertyRelative("subMeshIndex");
-                    var matProp = usage.FindPropertyRelative("material");
-                    var smr = rendererProp.objectReferenceValue as SkinnedMeshRenderer;
-                    var mat = matProp.objectReferenceValue as Material;
-                    EditorGUILayout.LabelField($"{(smr ? smr.name : "(Missing Renderer)")} / SubMesh {subMeshProp.intValue} / {(mat ? mat.name : "(Missing Material)")}");
-                }
-            }
-
+            EditorGUILayout.EndVertical();
+            EditorGUILayout.EndHorizontal();
             EditorGUILayout.EndVertical();
         }
+    }
+
+    private static string BuildMaterialNamesText(SerializedProperty usagesProp)
+    {
+        if (usagesProp == null || usagesProp.arraySize == 0) return "-";
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        for (int i = 0; i < usagesProp.arraySize; i++)
+        {
+            var usageProp = usagesProp.GetArrayElementAtIndex(i);
+            var materialProp = usageProp.FindPropertyRelative("material");
+            var mat = materialProp.objectReferenceValue as Material;
+            if (mat == null) continue;
+            if (!seen.Add(mat.name)) continue;
+            names.Add(mat.name);
+        }
+
+        return names.Count > 0 ? string.Join(", ", names) : "-";
     }
 
     private static PreviewState GetPreviewState(NDMFVRoidMeshTrimmer trimmer)
@@ -269,9 +344,12 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         return state;
     }
 
-    private static void RequestBuildPreview(NDMFVRoidMeshTrimmer trimmer, PreviewState state, PreviewUpdateType type)
+    private static bool RequestBuildPreview(NDMFVRoidMeshTrimmer trimmer, PreviewState state, PreviewUpdateType type)
     {
-        if (trimmer == null || state.queued || state.processing) return;
+        if (trimmer == null || state.queued || state.processing) return false;
+        if (IsAnotherPreviewActiveInAvatar(trimmer)) return false;
+        EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
+        state.failed = false;
         state.queued = true;
         state.processing = true;
         EditorUtility.SetDirty(trimmer);
@@ -284,6 +362,26 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             BuildPreview(trimmer, state, type);
             UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
         };
+
+        return true;
+    }
+
+
+    private static bool IsAnotherPreviewActiveInAvatar(NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (trimmer == null || trimmer.transform == null) return false;
+        var root = trimmer.transform.root;
+        if (root == null) return false;
+
+        var trimmers = root.GetComponentsInChildren<NDMFVRoidMeshTrimmer>(true);
+        foreach (var other in trimmers)
+        {
+            if (other == null || other == trimmer) continue;
+            var otherState = GetPreviewState(other);
+            if (otherState.active || otherState.processing || otherState.queued) return true;
+        }
+
+        return false;
     }
 
     private static void BuildPreview(NDMFVRoidMeshTrimmer trimmer, PreviewState state, PreviewUpdateType type)
@@ -317,6 +415,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
             trimmer.PreviewActiveSerialized = true;
             EditorUtility.SetDirty(trimmer);
+            state.failed = false;
         }
         finally
         {
@@ -381,6 +480,9 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
     private static void RebuildPreviewTexturesAndMaterials(NDMFVRoidMeshTrimmer trimmer, PreviewState state, ref int textureFillExecCount)
     {
+        bool useToonStandardShaderForPreview = trimmer != null && (trimmer.enableForAndroid || trimmer.enableForiOS);
+        Shader toonStandardShader = useToonStandardShaderForPreview ? FindToonStandardShaderForPreview() : null;
+
         foreach (var texState in state.textureStates.Values)
         {
             if (texState.previewTexture != null) UnityEngine.Object.DestroyImmediate(texState.previewTexture);
@@ -421,6 +523,11 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
                     name = m.name + " (NDMF VRoid Mesh Trimmer Preview)",
                     hideFlags = HideFlags.HideAndDontSave
                 };
+                if (toonStandardShader != null)
+                {
+                    pm.shader = toonStandardShader;
+                    CopyKnownCullModeProperties(m, pm);
+                }
                 pm.SetTexture(prop, previewTex);
                 mats[i] = pm;
                 textureFillExecCount++;
@@ -436,6 +543,44 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
             r.previewMaterials = mats;
             r.renderer.sharedMaterials = mats;
+        }
+    }
+
+
+    private static Shader FindToonStandardShaderForPreview()
+    {
+        // Prefer VRChat mobile Toon Standard, fallback to Unlit/Texture when unavailable.
+        string[] candidates =
+        {
+            "VRChat/Mobile/Toon Standard",
+            "Unlit/Texture"
+        };
+
+        foreach (var shaderName in candidates)
+        {
+            var shader = Shader.Find(shaderName);
+            if (shader != null) return shader;
+        }
+
+        return null;
+    }
+
+    private static void CopyKnownCullModeProperties(Material source, Material destination)
+    {
+        if (source == null || destination == null || !destination.HasProperty("_Culling")) return;
+
+        string[] sourceCullProps =
+        {
+            "_M_CullMode", // MToon10
+            "_CullMode",   // legacy MToon
+            "_Cull"        // lilToon
+        };
+
+        foreach (var prop in sourceCullProps)
+        {
+            if (!source.HasProperty(prop)) continue;
+            destination.SetFloat("_Culling", source.GetFloat(prop));
+            return;
         }
     }
 
@@ -527,6 +672,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             {
                 Material mat = mats[sub];
                 if (mat == null) continue;
+                if (!ShouldProcessMaterial(mat)) continue;
                 if (!MaterialMainTextureResolver.TryGetMainTexture(mat, out Texture2D tex, out _)) continue;
 
                 if (!grouped.TryGetValue(tex, out var targetSettings))
@@ -549,15 +695,50 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         trimmer.targets.AddRange(grouped.Values);
         EditorUtility.SetDirty(trimmer);
     }
+
+    internal static void EnsureAutoDetectedTargets(NDMFVRoidMeshTrimmer trimmer, bool forceRefresh)
+    {
+        if (trimmer == null) return;
+        if (forceRefresh || trimmer.targets == null || trimmer.targets.Count == 0) AutoDetectTargets(trimmer);
+    }
+
+    private static bool ShouldProcessMaterial(Material mat)
+    {
+        if (mat == null) return false;
+        if (mat.renderQueue >= (int)UnityEngine.Rendering.RenderQueue.Transparent) return true;
+
+        string renderType = mat.GetTag("RenderType", false, string.Empty);
+        if (string.Equals(renderType, "Transparent", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(renderType, "TransparentCutout", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (mat.HasProperty("_MToonSurface")) return Mathf.RoundToInt(mat.GetFloat("_MToonSurface")) != 0;
+        if (mat.HasProperty("_BlendMode")) return Mathf.RoundToInt(mat.GetFloat("_BlendMode")) != 0; // legacy MToon
+        if (mat.HasProperty("_TransparentMode")) return Mathf.RoundToInt(mat.GetFloat("_TransparentMode")) != 0; // lilToon
+        if (mat.HasProperty("_Surface")) return Mathf.RoundToInt(mat.GetFloat("_Surface")) != 0; // URP/HDRP
+
+        if (mat.IsKeywordEnabled("_ALPHATEST_ON") || mat.IsKeywordEnabled("_ALPHABLEND_ON") || mat.IsKeywordEnabled("_ALPHAPREMULTIPLY_ON"))
+        {
+            return true;
+        }
+
+        return false;
+    }
 }
 
 public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlugin>
 {
+    public override string QualifiedName => "jp.yoridrill.ndmf-vroid-mesh-trimmer";
     public override string DisplayName => "NDMF VRoid Mesh Trimmer";
 
     protected override void Configure()
     {
         var sequence = InPhase(BuildPhase.Transforming)
+            .AfterPlugin("NDMF VRoid Arm Patch")
+            .BeforePlugin("NDMF MToon10 to lilToon")
+            .BeforePlugin("Meshia Mesh Simplification")
             .BeforePlugin("KRT.VRCQuestTools.Ndmf.VRCQuestToolsPlugin")
             .BeforePlugin("KRT.VRCQuestTools.Ndmf.AvatarConverterNdmfPlugin")
             .BeforePlugin("KRT.VRCQuestTools.AvatarConverter.Ndmf.AvatarConverterPlugin")
@@ -569,12 +750,43 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
             if (avatarRoot == null) return;
             var trimmers = avatarRoot.GetComponentsInChildren<NDMFVRoidMeshTrimmer>(true);
             NDMFVRoidMeshTrimmerEditor.ClearAllPreviews();
+            bool executedForCurrentPlatform = false;
             foreach (var trimmer in trimmers)
             {
-                if (trimmer == null || !trimmer.enabled) continue;
+                if (trimmer == null || !IsEnabledForCurrentBuildTarget(trimmer)) continue;
+                if (executedForCurrentPlatform)
+                {
+                    continue;
+                }
+
+                NDMFVRoidMeshTrimmerEditor.EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
                 MeshTrimProcessor.ApplyTrim(trimmer, true);
                 TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
+                executedForCurrentPlatform = true;
+            }
+
+            // Remove all trimmer components from the generated avatar object to avoid AAO/VRChat validation warnings.
+            foreach (var trimmer in trimmers)
+            {
+                if (trimmer == null) continue;
+                UnityEngine.Object.DestroyImmediate(trimmer);
             }
         });
+    }
+
+    private static bool IsEnabledForCurrentBuildTarget(NDMFVRoidMeshTrimmer trimmer)
+    {
+        switch (EditorUserBuildSettings.activeBuildTarget)
+        {
+            case BuildTarget.StandaloneWindows:
+            case BuildTarget.StandaloneWindows64:
+                return trimmer.enableForWindows;
+            case BuildTarget.Android:
+                return trimmer.enableForAndroid;
+            case BuildTarget.iOS:
+                return trimmer.enableForiOS;
+            default:
+                return false;
+        }
     }
 }

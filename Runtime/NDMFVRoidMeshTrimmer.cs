@@ -1,10 +1,10 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using VRC.SDKBase;
 
-[DisallowMultipleComponent]
-[AddComponentMenu("NDMF VRoid Mesh Trimmer")]
-public class NDMFVRoidMeshTrimmer : MonoBehaviour
+[AddComponentMenu("yoridrill/NDMF VRoid Mesh Trimmer")]
+public class NDMFVRoidMeshTrimmer : MonoBehaviour, IEditorOnly
 {
     public enum TexturePostProcessMode
     {
@@ -40,7 +40,10 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour
         public Material[] originalSharedMaterials;
     }
 
-    public bool enabled = true;
+    public bool enableForWindows = false;
+    public bool enableForAndroid = true;
+    public bool enableForiOS = true;
+    public bool enableTexturePadding = false;
     public List<TextureTargetSettings> targets = new List<TextureTargetSettings>();
 
     [Range(0f, 1f)] public float alphaThreshold = 0.5f;
