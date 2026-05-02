@@ -832,14 +832,16 @@ public static class MeshTrimProcessor
                 bool smallAreaCandidate = r.state == TriangleTrimState.Clipped &&
                                           (r.keptAreaRatio < trimmer.bridgeSmallKeptAreaRatio ||
                                            r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio);
-                if (!removedCandidate && !smallAreaCandidate) continue;
 
                 int triBase = r.triangleIndex * 3;
                 if (triBase < 0 || triBase + 2 >= srcIndices.Length) continue;
                 int ti0 = srcIndices[triBase];
                 int ti1 = srcIndices[triBase + 1];
                 int ti2 = srcIndices[triBase + 2];
-                if (CountNeighborCutEdges(edgeCuts, ti0, ti1, ti2) < 2) continue;
+                int neighborCutEdges = CountNeighborCutEdges(edgeCuts, ti0, ti1, ti2);
+                bool continuityCandidate = trimmer.bridgeUseNeighborKeptSide && neighborCutEdges >= 2;
+                if (!removedCandidate && !smallAreaCandidate && !continuityCandidate) continue;
+                if (neighborCutEdges < 2) continue;
 
                 if (TryBridgeCutAmbiguousTriangle(r.triangleIndex, ti0, ti1, ti2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
                 {
