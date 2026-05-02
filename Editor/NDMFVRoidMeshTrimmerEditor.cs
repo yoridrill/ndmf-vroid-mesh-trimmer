@@ -693,7 +693,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         }
 
         trimmer.targets.AddRange(grouped.Values);
-        AutoFillColorResolver.Apply(trimmer.targets);
+        AutoFillColorResolver.Apply(trimmer, trimmer.targets);
         EditorUtility.SetDirty(trimmer);
     }
 

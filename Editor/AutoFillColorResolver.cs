@@ -38,9 +38,9 @@ public static class AutoFillColorResolver
         public string sourcePath;
     }
 
-    public static void Apply(List<NDMFVRoidMeshTrimmer.TextureTargetSettings> targets)
+    public static void Apply(NDMFVRoidMeshTrimmer trimmer, List<NDMFVRoidMeshTrimmer.TextureTargetSettings> targets)
     {
-        if (targets == null || targets.Count == 0) return;
+        if (trimmer == null || targets == null || targets.Count == 0) return;
 
         var loadResult = LoadConfig();
         var config = loadResult.config;
@@ -52,7 +52,7 @@ public static class AutoFillColorResolver
 
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Auto fill-color config source: {loadResult.source} ({loadResult.sourcePath})");
 
-        var materialMap = BuildMaterialMap(targets);
+        var materialMap = BuildMaterialMap(trimmer);
         var appliedTargets = new HashSet<NDMFVRoidMeshTrimmer.TextureTargetSettings>();
 
         foreach (var rule in config.fillColors)
@@ -75,18 +75,21 @@ public static class AutoFillColorResolver
         }
     }
 
-    private static Dictionary<string, Material> BuildMaterialMap(List<NDMFVRoidMeshTrimmer.TextureTargetSettings> targets)
+    private static Dictionary<string, Material> BuildMaterialMap(NDMFVRoidMeshTrimmer trimmer)
     {
         var map = new Dictionary<string, Material>(StringComparer.OrdinalIgnoreCase);
-        foreach (var target in targets)
+        var renderers = trimmer.GetComponentsInChildren<Renderer>(true);
+        foreach (var renderer in renderers)
         {
-            if (target == null || target.usages == null) continue;
-            foreach (var usage in target.usages)
+            if (renderer == null) continue;
+            var mats = renderer.sharedMaterials;
+            if (mats == null) continue;
+            foreach (var mat in mats)
             {
-                if (usage == null || usage.material == null) continue;
-                string key = Normalize(usage.material.name);
+                if (mat == null) continue;
+                string key = Normalize(mat.name);
                 if (string.IsNullOrEmpty(key) || map.ContainsKey(key)) continue;
-                map[key] = usage.material;
+                map[key] = mat;
             }
         }
 
@@ -101,7 +104,15 @@ public static class AutoFillColorResolver
         {
             string key = Normalize(candidate);
             if (string.IsNullOrEmpty(key)) continue;
-            if (map.TryGetValue(key, out material)) return true;
+
+            foreach (var pair in map)
+            {
+                if (pair.Key.Contains(key))
+                {
+                    material = pair.Value;
+                    return true;
+                }
+            }
         }
 
         return false;
@@ -125,7 +136,7 @@ public static class AutoFillColorResolver
                 string materialName = Normalize(usage.material.name);
                 for (int i = 0; i < targetCandidates.Length; i++)
                 {
-                    if (materialName == Normalize(targetCandidates[i]))
+                    if (materialName.Contains(Normalize(targetCandidates[i])))
                     {
                         target = settings;
                         return true;
