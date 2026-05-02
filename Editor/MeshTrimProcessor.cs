@@ -53,6 +53,8 @@ public static class MeshTrimProcessor
         public int triangleIndex;
         public int cutPointIndex;
         public Vector2 cutPointUv;
+        public int edgeA;
+        public int edgeB;
     }
 
     private struct BridgeStats
@@ -572,6 +574,7 @@ public static class MeshTrimProcessor
 
         for (int i = 0; i < srcIndices.Length; i += 3)
         {
+            int triIndex = i / 3;
             int i0 = srcIndices[i];
             int i1 = srcIndices[i + 1];
             int i2 = srcIndices[i + 2];
@@ -699,6 +702,8 @@ public static class MeshTrimProcessor
                     continue;
                 }
 
+                AddEdgeCut(edgeCuts, triIndex, edgeA1, edgeB1, cutA, uv);
+                AddEdgeCut(edgeCuts, triIndex, edgeA2, edgeB2, cutB, uv);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, virtualInside, cutA, cutB, vertices, uv, trimmer, ref stats);
                 stats.twoEdgeMidpointsInsideClipped++;
                 triangleResults.Add(BuildResult(TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
@@ -741,6 +746,8 @@ public static class MeshTrimProcessor
                     vertexSources,
                     cache, ref stats);
 
+                AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
+                AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, insideV, cutA, cutB, vertices, uv, trimmer, ref stats);
                 triangleResults.Add(BuildResult(TriangleTrimState.Clipped, i0, i1, i2, uv, 0.33f, 2));
             }
@@ -777,6 +784,8 @@ public static class MeshTrimProcessor
                     vertexSources,
                     cache, ref stats);
 
+                AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
+                AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, inA, inB, cutA, vertices, uv, trimmer, ref stats);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, inB, cutB, cutA, vertices, uv, trimmer, ref stats);
                 triangleResults.Add(BuildResult(TriangleTrimState.Clipped, i0, i1, i2, uv, 0.66f, 2));
@@ -793,7 +802,10 @@ public static class MeshTrimProcessor
             bool ambiguous = r.state == TriangleTrimState.Ambiguous;
             bool smallKept = r.state == TriangleTrimState.Clipped && r.keptAreaRatio < trimmer.bridgeSmallKeptAreaRatio;
             bool smallRemoved = r.state == TriangleTrimState.Clipped && r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio;
-            if (ambiguous || smallKept || smallRemoved) bridgeStats.bridgeCandidatesCount++;
+            int cutCount = 0;
+            for (int e = 0; e < edgeCuts.Count; e++) if (edgeCuts[e].triangleIndex == i) cutCount++;
+            bool hasNeighborCutContinuityIssue = cutCount >= 2 && r.state != TriangleTrimState.Clipped;
+            if (ambiguous || smallKept || smallRemoved || hasNeighborCutContinuityIssue) bridgeStats.bridgeCandidatesCount++;
             if (ambiguous) bridgeStats.ambiguousBridgeCandidates++;
             if (smallKept) bridgeStats.smallKeptAreaBridgeCandidates++;
             if (smallRemoved) bridgeStats.smallRemovedAreaBridgeCandidates++;
@@ -811,6 +823,24 @@ public static class MeshTrimProcessor
         return stats;
     }
 
+
+
+    private static void AddEdgeCut(List<EdgeCutInfo> edgeCuts, int triangleIndex, int edgeA, int edgeB, int cutPointIndex, List<Vector2> uv)
+    {
+        if (cutPointIndex < 0 || cutPointIndex >= uv.Count) return;
+        int lo = Math.Min(edgeA, edgeB);
+        int hi = Math.Max(edgeA, edgeB);
+        long key = ((long)lo << 32) | (uint)hi;
+        edgeCuts.Add(new EdgeCutInfo
+        {
+            edgeKey = key,
+            triangleIndex = triangleIndex,
+            cutPointIndex = cutPointIndex,
+            cutPointUv = uv[cutPointIndex],
+            edgeA = edgeA,
+            edgeB = edgeB
+        });
+    }
 
     private static TriangleTrimResult BuildResult(TriangleTrimState state, int i0, int i1, int i2, List<Vector2> uv, float keptAreaRatio, int cutEdges)
     {
