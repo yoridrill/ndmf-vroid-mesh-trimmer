@@ -24,12 +24,33 @@ public static class AutoFillColorResolver
         public float[] uv;
     }
 
+    private enum ConfigSource
+    {
+        None,
+        User,
+        Default
+    }
+
+    private struct ConfigLoadResult
+    {
+        public FillColorConfig config;
+        public ConfigSource source;
+        public string sourcePath;
+    }
+
     public static void Apply(List<NDMFVRoidMeshTrimmer.TextureTargetSettings> targets)
     {
         if (targets == null || targets.Count == 0) return;
 
-        var config = LoadConfig();
-        if (config == null || config.fillColors == null || config.fillColors.Length == 0) return;
+        var loadResult = LoadConfig();
+        var config = loadResult.config;
+        if (config == null || config.fillColors == null || config.fillColors.Length == 0)
+        {
+            Debug.Log("[NDMF VRoid Mesh Trimmer] Auto fill-color config is empty or unavailable.");
+            return;
+        }
+
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Auto fill-color config source: {loadResult.source} ({loadResult.sourcePath})");
 
         var materialMap = BuildMaterialMap(targets);
         var appliedTargets = new HashSet<NDMFVRoidMeshTrimmer.TextureTargetSettings>();
@@ -47,6 +68,10 @@ public static class AutoFillColorResolver
             target.texturePostProcessMode = NDMFVRoidMeshTrimmer.TexturePostProcessMode.FillColor;
             target.fillColor = fillColor;
             appliedTargets.Add(target);
+
+            string targetName = GetFirstUsageMaterialName(target);
+            string texName = target.mainTexture != null ? target.mainTexture.name : "(None)";
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] Auto fill-color applied. TargetMaterial={targetName}, TargetTexture={texName}, SourceMaterial={sourceMaterial.name}, UV=({uv.x:F3}, {uv.y:F3}), Color=RGBA({fillColor.r:F3}, {fillColor.g:F3}, {fillColor.b:F3}, {fillColor.a:F3})");
         }
     }
 
@@ -202,39 +227,78 @@ public static class AutoFillColorResolver
         return found;
     }
 
-    private static FillColorConfig LoadConfig()
+    private static ConfigLoadResult LoadConfig()
     {
-        string json = TryLoadUserJson();
-        if (string.IsNullOrWhiteSpace(json))
+        var result = new ConfigLoadResult { source = ConfigSource.None, sourcePath = "(none)", config = null };
+
+        string json = TryLoadUserJson(out string userPath);
+        if (!string.IsNullOrWhiteSpace(json))
         {
-            json = TryLoadDefaultJson();
+            result.source = ConfigSource.User;
+            result.sourcePath = userPath;
+            result.config = ParseConfig(json, userPath);
+            return result;
         }
 
-        if (string.IsNullOrWhiteSpace(json)) return null;
+        json = TryLoadDefaultJson(out string defaultPath);
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            result.source = ConfigSource.Default;
+            result.sourcePath = defaultPath;
+            result.config = ParseConfig(json, defaultPath);
+            return result;
+        }
 
+        Debug.LogWarning("[NDMF VRoid Mesh Trimmer] Fill-color config not found. Checked user and default JSON.");
+        return result;
+    }
+
+    private static FillColorConfig ParseConfig(string json, string path)
+    {
+        FillColorConfig config = null;
         try
         {
-            return JsonUtility.FromJson<FillColorConfig>(json);
+            config = JsonUtility.FromJson<FillColorConfig>(json);
         }
         catch (Exception ex)
         {
-            Debug.LogWarning("[NDMF VRoid Mesh Trimmer] Failed to parse fill-color config JSON: " + ex.Message);
+            Debug.LogWarning("[NDMF VRoid Mesh Trimmer] Failed to parse fill-color config JSON: " + ex.Message + " (" + path + ")");
             return null;
         }
+
+        if (config == null || config.fillColors == null)
+        {
+            Debug.LogWarning("[NDMF VRoid Mesh Trimmer] Failed to parse fill-color config JSON: deserialized object was null or missing fillColors. (" + path + ")");
+            return null;
+        }
+
+        return config;
     }
 
-    private static string TryLoadUserJson()
+    private static string TryLoadUserJson(out string path)
     {
+        path = UserConfigPath;
         var asset = AssetDatabase.LoadAssetAtPath<TextAsset>(UserConfigPath);
         return asset != null ? asset.text : null;
     }
 
-    private static string TryLoadDefaultJson()
+    private static string TryLoadDefaultJson(out string path)
     {
-        string path = AssetDatabase.GUIDToAssetPath(DefaultConfigGuid);
+        path = AssetDatabase.GUIDToAssetPath(DefaultConfigGuid);
         if (string.IsNullOrWhiteSpace(path)) return null;
         var asset = AssetDatabase.LoadAssetAtPath<TextAsset>(path);
         return asset != null ? asset.text : null;
+    }
+
+    private static string GetFirstUsageMaterialName(NDMFVRoidMeshTrimmer.TextureTargetSettings target)
+    {
+        if (target == null || target.usages == null) return "(Unknown)";
+        foreach (var usage in target.usages)
+        {
+            if (usage != null && usage.material != null) return usage.material.name;
+        }
+
+        return "(Unknown)";
     }
 
     private static string Normalize(string value)
