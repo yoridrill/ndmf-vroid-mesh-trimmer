@@ -889,6 +889,11 @@ public static class MeshTrimProcessor
         else return false;
         if (cutA<0||cutB<0||cutA>=uv.Count||cutB>=uv.Count) return false;
 
+                float triArea = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f;
+        if (triArea <= trimmer.minTriangleUvArea) return false;
+        float cutArea = Mathf.Abs(SignedArea(uv[shared], uv[cutA], uv[cutB])) * 0.5f;
+        if (cutArea <= trimmer.minTriangleUvArea) return false;
+
         bool keepSharedCorner = trimmer.bridgeUseNeighborKeptSide;
         if (!trimmer.bridgeUseNeighborKeptSide)
         {
@@ -905,6 +910,9 @@ public static class MeshTrimProcessor
         }
         else
         {
+            float a1 = Mathf.Abs(SignedArea(uv[other1], uv[other2], uv[cutA])) * 0.5f;
+            float a2 = Mathf.Abs(SignedArea(uv[other2], uv[cutB], uv[cutA])) * 0.5f;
+            if (a1 <= trimmer.minTriangleUvArea || a2 <= trimmer.minTriangleUvArea) return false;
             AddTrianglePreserveWinding(dstIndices, i0, i1, i2, other1, other2, cutA, vertices, uv, trimmer, ref stats);
             AddTrianglePreserveWinding(dstIndices, i0, i1, i2, other2, cutB, cutA, vertices, uv, trimmer, ref stats);
         }
