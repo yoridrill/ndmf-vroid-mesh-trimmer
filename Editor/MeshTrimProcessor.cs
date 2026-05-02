@@ -839,7 +839,8 @@ public static class MeshTrimProcessor
                 int ti1 = srcIndices[triBase + 1];
                 int ti2 = srcIndices[triBase + 2];
                 int neighborCutEdges = CountNeighborCutEdges(edgeCuts, ti0, ti1, ti2);
-                bool continuityCandidate = trimmer.bridgeUseNeighborKeptSide && neighborCutEdges >= 2;
+                // Pass2 appends geometry; avoid applying it to already-clipped triangles or tips become too thick.
+                bool continuityCandidate = trimmer.bridgeUseNeighborKeptSide && neighborCutEdges >= 2 && removedCandidate;
                 if (!removedCandidate && !smallAreaCandidate && !continuityCandidate) continue;
                 if (neighborCutEdges < 2) continue;
 
