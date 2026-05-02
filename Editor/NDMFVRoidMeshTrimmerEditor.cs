@@ -734,6 +734,9 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
     protected override void Configure()
     {
         var sequence = InPhase(BuildPhase.Transforming)
+            .AfterPlugin("NDMF VRoid Arm Patch")
+            .BeforePlugin("NDMF MToon10 to lilToon")
+            .BeforePlugin("Meshia Mesh Simplification")
             .BeforePlugin("KRT.VRCQuestTools.Ndmf.VRCQuestToolsPlugin")
             .BeforePlugin("KRT.VRCQuestTools.Ndmf.AvatarConverterNdmfPlugin")
             .BeforePlugin("KRT.VRCQuestTools.AvatarConverter.Ndmf.AvatarConverterPlugin")
@@ -758,6 +761,13 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
                 MeshTrimProcessor.ApplyTrim(trimmer, true);
                 TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
                 executedForCurrentPlatform = true;
+            }
+
+            // Remove all trimmer components from the generated avatar object to avoid AAO/VRChat validation warnings.
+            foreach (var trimmer in trimmers)
+            {
+                if (trimmer == null) continue;
+                UnityEngine.Object.DestroyImmediate(trimmer);
             }
         });
     }
