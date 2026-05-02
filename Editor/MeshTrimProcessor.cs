@@ -794,7 +794,7 @@ public static class MeshTrimProcessor
             bool smallRemoved = r.state == TriangleTrimState.Clipped && r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio;
             int cutCount = 0;
             for (int e = 0; e < edgeCuts.Count; e++) if (edgeCuts[e].triangleIndex == r.triangleIndex) cutCount++;
-            bool hasNeighborCutContinuityIssue = trimmer.bridgeUseNeighborKeptSide && cutCount >= 2 && r.state != TriangleTrimState.Clipped;
+            bool hasNeighborCutContinuityIssue = trimmer.bridgeUseNeighborKeptSide && cutCount >= 2;
             if (ambiguous || smallKept || smallRemoved || hasNeighborCutContinuityIssue) bridgeStats.bridgeCandidatesCount++;
             if (ambiguous) bridgeStats.ambiguousBridgeCandidates++;
             if (smallKept) bridgeStats.smallKeptAreaBridgeCandidates++;
