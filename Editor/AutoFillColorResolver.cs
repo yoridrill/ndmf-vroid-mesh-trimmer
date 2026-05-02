@@ -14,6 +14,7 @@ public static class AutoFillColorResolver
     {
         public int version;
         public FillColorRule[] fillColors;
+        public PreSubdivideRule[] preSubdivide;
     }
 
     [Serializable]
@@ -22,6 +23,13 @@ public static class AutoFillColorResolver
         public string[] target;
         public string[] source;
         public float[] uv;
+    }
+
+    [Serializable]
+    private class PreSubdivideRule
+    {
+        public string[] target;
+        public int level;
     }
 
     private enum ConfigSource
@@ -55,6 +63,9 @@ public static class AutoFillColorResolver
         var materialMap = BuildMaterialMap(trimmer);
         var appliedTargets = new HashSet<NDMFVRoidMeshTrimmer.TextureTargetSettings>();
 
+
+        ApplyPreSubdivideRules(config, targets);
+
         foreach (var rule in config.fillColors)
         {
             if (rule == null || appliedTargets.Count == targets.Count) continue;
@@ -73,6 +84,40 @@ public static class AutoFillColorResolver
             string texName = target.mainTexture != null ? target.mainTexture.name : "(None)";
             Debug.Log($"[NDMF VRoid Mesh Trimmer] Auto fill-color applied. TargetMaterial={targetName}, TargetTexture={texName}, SourceMaterial={sourceMaterial.name}, UV=({uv.x:F3}, {uv.y:F3}), Color=RGBA({fillColor.r:F3}, {fillColor.g:F3}, {fillColor.b:F3}, {fillColor.a:F3})");
         }
+    }
+
+    private static void ApplyPreSubdivideRules(FillColorConfig config, List<NDMFVRoidMeshTrimmer.TextureTargetSettings> targets)
+    {
+        if (config.preSubdivide == null) return;
+        foreach (var target in targets)
+        {
+            if (target == null || target.usages == null) continue;
+            target.enablePreSubdivide = false;
+            target.preSubdivideLevel = 0;
+            foreach (var rule in config.preSubdivide)
+            {
+                if (rule == null || rule.target == null) continue;
+                if (!TryMatchTarget(target, rule.target)) continue;
+                target.enablePreSubdivide = rule.level > 0;
+                target.preSubdivideLevel = Mathf.Clamp(rule.level, 0, 2);
+                break;
+            }
+        }
+    }
+
+    private static bool TryMatchTarget(NDMFVRoidMeshTrimmer.TextureTargetSettings settings, string[] targetCandidates)
+    {
+        foreach (var usage in settings.usages)
+        {
+            if (usage == null || usage.material == null) continue;
+            string materialName = Normalize(usage.material.name);
+            for (int i = 0; i < targetCandidates.Length; i++)
+            {
+                string candidate = Normalize(targetCandidates[i]);
+                if (!string.IsNullOrEmpty(candidate) && materialName.Contains(candidate)) return true;
+            }
+        }
+        return false;
     }
 
     private static Dictionary<string, Material> BuildMaterialMap(NDMFVRoidMeshTrimmer trimmer)

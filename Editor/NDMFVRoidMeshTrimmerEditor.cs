@@ -267,6 +267,8 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             var modeProp = targetProp.FindPropertyRelative("texturePostProcessMode");
             var fillColorProp = targetProp.FindPropertyRelative("fillColor");
             var usagesProp = targetProp.FindPropertyRelative("usages");
+            var preSubEnableProp = targetProp.FindPropertyRelative("enablePreSubdivide");
+            var preSubLevelProp = targetProp.FindPropertyRelative("preSubdivideLevel");
 
             Texture2D tex = texProp.objectReferenceValue as Texture2D;
             string textureName = tex ? tex.name : "(None)";
@@ -315,8 +317,22 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
                 mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUI.EnumPopup(controlsRect, mode);
             }
             EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label("PreSubdivide", GUILayout.Width(compactLabelWidth));
+            var preRect = GUILayoutUtility.GetRect(0f, EditorGUIUtility.singleLineHeight, GUILayout.ExpandWidth(true));
+            float left = Mathf.Min(120f, preRect.width * 0.5f);
+            var enRect = new Rect(preRect.x, preRect.y, left, preRect.height);
+            var lvRect = new Rect(preRect.x + left + 4f, preRect.y, Mathf.Max(0f, preRect.width - left - 4f), preRect.height);
+            preSubEnableProp.boolValue = EditorGUI.ToggleLeft(enRect, "Enable", preSubEnableProp.boolValue);
+            using (new EditorGUI.DisabledScope(!preSubEnableProp.boolValue))
+            {
+                preSubLevelProp.intValue = EditorGUI.IntSlider(lvRect, preSubLevelProp.intValue, 0, 2);
+            }
+            EditorGUILayout.EndHorizontal();
+
             modeProp.enumValueIndex = (int)mode;
-            if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.TextureOnly);
+            if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.MeshAndTexture);
 
             EditorGUILayout.EndVertical();
             EditorGUILayout.EndHorizontal();

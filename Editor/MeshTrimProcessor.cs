@@ -22,6 +22,8 @@ public static class MeshTrimProcessor
     {
         public AlphaMaskProcessor.AlphaMaskData maskData;
         public Texture2D texture;
+        public bool enablePreSubdivide;
+        public int preSubdivideLevel;
     }
 
     private struct TrimStats
@@ -89,7 +91,9 @@ public static class MeshTrimProcessor
                 subTasks[usage.subMeshIndex] = new SubMeshTask
                 {
                     maskData = maskData,
-                    texture = target.mainTexture
+                    texture = target.mainTexture,
+                    enablePreSubdivide = target.enablePreSubdivide,
+                    preSubdivideLevel = target.preSubdivideLevel
                 };
             }
         }
@@ -156,8 +160,18 @@ public static class MeshTrimProcessor
                 continue;
             }
 
+            int[] workingIndices = srcIndices;
+            int triBeforeSub = srcIndices.Length / 3;
+            int preAddedVertices = 0;
+            var swPre = System.Diagnostics.Stopwatch.StartNew();
+            if (task.enablePreSubdivide && task.preSubdivideLevel > 0)
+            {
+                workingIndices = PreSubdivideIndices(srcIndices, task.preSubdivideLevel, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref preAddedVertices);
+            }
+            swPre.Stop();
+
             TrimStats stats = ProcessSubMesh(
-                srcIndices,
+                workingIndices,
                 task.maskData,
                 trimmer,
                 vertices,
@@ -182,7 +196,7 @@ public static class MeshTrimProcessor
             stats.addedVertices = vertices.Count - baseVertexCount;
             baseVertexCount = vertices.Count;
 
-            Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={renderer.name}, SubMesh={sub}, Texture={task.texture.name}, " +
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={renderer.name}, SubMesh={sub}, Texture={task.texture.name}, PreSubdivideEnabled={task.enablePreSubdivide}, PreSubdivideLevel={task.preSubdivideLevel}, TrianglesBeforePreSubdivide={triBeforeSub}, TrianglesAfterPreSubdivide={workingIndices.Length / 3}, PreSubdivideAddedVertices={preAddedVertices}, PreSubdivideMs={swPre.ElapsedMilliseconds}, " +
                       $"OriginalTriangles={stats.originalTriangles}, OutputTriangles={stats.outputTriangles}, RemovedTriangles={stats.removedTriangles}, " +
                       $"AddedVertices={stats.addedVertices}, Intersections={stats.intersections}, " +
                       $"AllInsideButInteriorOutside={stats.allInsideButInteriorOutside}, AllOutsideButInteriorInside={stats.allOutsideButInteriorInside}, " +
@@ -221,6 +235,61 @@ public static class MeshTrimProcessor
         dst.RecalculateBounds();
         renderer.sharedMesh = dst;
         RestoreBlendShapeWeights(renderer, dst, savedBlendShapeNames, savedBlendShapeWeights);
+    }
+
+    private static int[] PreSubdivideIndices(
+        int[] srcIndices,
+        int level,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Vector2> uv,
+        List<Vector2> uv2,
+        List<Vector2> uv3,
+        List<Vector2> uv4,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasUv2,
+        bool hasUv3,
+        bool hasUv4,
+        bool hasColors,
+        bool hasBoneWeights,
+        List<VertexSource> vertexSources,
+        ref int addedVertices)
+    {
+        var indices = srcIndices;
+        for (int lv = 0; lv < level; lv++)
+        {
+            var cache = new Dictionary<long, int>();
+            var next = new List<int>(indices.Length * 4);
+            for (int i = 0; i < indices.Length; i += 3)
+            {
+                int i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+                int m01 = GetOrCreateMid(i0, i1, cache, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref addedVertices);
+                int m12 = GetOrCreateMid(i1, i2, cache, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref addedVertices);
+                int m20 = GetOrCreateMid(i2, i0, cache, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref addedVertices);
+                next.Add(i0); next.Add(m01); next.Add(m20);
+                next.Add(m01); next.Add(i1); next.Add(m12);
+                next.Add(m20); next.Add(m12); next.Add(i2);
+                next.Add(m01); next.Add(m12); next.Add(m20);
+            }
+            indices = next.ToArray();
+        }
+        return indices;
+    }
+
+    private static int GetOrCreateMid(int a, int b, Dictionary<long, int> cache,
+        List<Vector3> vertices, List<Vector3> normals, List<Vector4> tangents, List<Vector2> uv, List<Vector2> uv2, List<Vector2> uv3, List<Vector2> uv4,
+        List<Color> colors, List<BoneWeight> boneWeights, bool hasNormals, bool hasTangents, bool hasUv2, bool hasUv3, bool hasUv4, bool hasColors, bool hasBoneWeights,
+        List<VertexSource> vertexSources, ref int addedVertices)
+    {
+        int lo = Math.Min(a,b), hi=Math.Max(a,b); long key=((long)lo<<32)|(uint)hi;
+        if (cache.TryGetValue(key, out int idx)) return idx;
+        TrimStats dummy = default;
+        idx = AddInterpolatedVertex(a,b,0.5f,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources, ref dummy);
+        cache[key]=idx; addedVertices++; return idx;
     }
 
     private static TrimStats ProcessSubMesh(
