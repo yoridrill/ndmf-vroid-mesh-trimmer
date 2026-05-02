@@ -623,7 +623,8 @@ public static class MeshTrimProcessor
                         {
                             stats.removedTriangles++;
                             bridgeStats.bridgeCutAppliedCount++;
-                            bridgeStats.keptSideDecidedByNeighborCount++;
+                            if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
+                            else bridgeStats.keptSideDecidedByMaskCount++;
                             triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 0f, 0));
                         }
                         else
@@ -655,7 +656,8 @@ public static class MeshTrimProcessor
                         {
                             AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
                             bridgeStats.bridgeCutAppliedCount++;
-                            bridgeStats.keptSideDecidedByMaskCount++;
+                            if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
+                            else bridgeStats.keptSideDecidedByMaskCount++;
                             triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 1));
                         }
                         else
@@ -824,7 +826,7 @@ public static class MeshTrimProcessor
             bool smallRemoved = r.state == TriangleTrimState.Clipped && r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio;
             int cutCount = 0;
             for (int e = 0; e < edgeCuts.Count; e++) if (edgeCuts[e].triangleIndex == r.triangleIndex) cutCount++;
-            bool hasNeighborCutContinuityIssue = cutCount >= 2 && r.state != TriangleTrimState.Clipped;
+            bool hasNeighborCutContinuityIssue = trimmer.bridgeUseNeighborKeptSide && cutCount >= 2 && r.state != TriangleTrimState.Clipped;
             if (ambiguous || smallKept || smallRemoved || hasNeighborCutContinuityIssue) bridgeStats.bridgeCandidatesCount++;
             if (ambiguous) bridgeStats.ambiguousBridgeCandidates++;
             if (smallKept) bridgeStats.smallKeptAreaBridgeCandidates++;
