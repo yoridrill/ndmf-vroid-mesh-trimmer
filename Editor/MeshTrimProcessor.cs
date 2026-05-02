@@ -178,11 +178,12 @@ public static class MeshTrimProcessor
             {
                 if (task.preSubdivideQuadAware)
                 {
-                    quadCandidates = CountQuadCandidates(srcIndices);
-                    rejectedQuads = quadCandidates;
-                    triFallback = triBeforeSub;
+                    workingIndices = PreSubdivideIndicesQuadAware(srcIndices, task.preSubdivideLevel, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref preAddedVertices, out quadCandidates, out acceptedQuads, out rejectedQuads, out triFallback);
                 }
-                workingIndices = PreSubdivideIndices(srcIndices, task.preSubdivideLevel, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref preAddedVertices);
+                else
+                {
+                    workingIndices = PreSubdivideIndices(srcIndices, task.preSubdivideLevel, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref preAddedVertices);
+                }
             }
             swPre.Stop();
 
@@ -308,6 +309,86 @@ public static class MeshTrimProcessor
         cache[key]=idx; addedVertices++; return idx;
     }
 
+
+
+    private struct TriRef { public int t; public int edge; }
+
+    private static int[] PreSubdivideIndicesQuadAware(
+        int[] srcIndices, int level,
+        List<Vector3> vertices, List<Vector3> normals, List<Vector4> tangents, List<Vector2> uv, List<Vector2> uv2, List<Vector2> uv3, List<Vector2> uv4,
+        List<Color> colors, List<BoneWeight> boneWeights, bool hasNormals, bool hasTangents, bool hasUv2, bool hasUv3, bool hasUv4, bool hasColors, bool hasBoneWeights,
+        List<VertexSource> vertexSources, ref int addedVertices, out int quadCandidates, out int acceptedQuads, out int rejectedQuads, out int triFallback)
+    {
+        int[] indices = srcIndices;
+        quadCandidates = 0; acceptedQuads = 0; rejectedQuads = 0; triFallback = 0;
+        for (int lv = 0; lv < level; lv++)
+        {
+            var edgeMap = new Dictionary<long, List<TriRef>>();
+            int triCount = indices.Length / 3;
+            for (int t = 0; t < triCount; t++)
+            {
+                int i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
+                AddTriEdge(edgeMap, i0, i1, t, 0);
+                AddTriEdge(edgeMap, i1, i2, t, 1);
+                AddTriEdge(edgeMap, i2, i0, t, 2);
+            }
+
+            var used = new bool[triCount];
+            var cache = new Dictionary<long,int>();
+            var next = new List<int>(indices.Length*4);
+            foreach (var kv in edgeMap)
+            {
+                if (kv.Value.Count != 2) continue;
+                quadCandidates++;
+                var a = kv.Value[0]; var b = kv.Value[1];
+                if (used[a.t] || used[b.t]) { rejectedQuads++; continue; }
+                int a0=indices[a.t*3],a1=indices[a.t*3+1],a2=indices[a.t*3+2];
+                int b0=indices[b.t*3],b1=indices[b.t*3+1],b2=indices[b.t*3+2];
+                int s0,s1; GetShared(a0,a1,a2,b0,b1,b2,out s0,out s1);
+                int oa=GetOther(a0,a1,a2,s0,s1), ob=GetOther(b0,b1,b2,s0,s1);
+                if (oa<0||ob<0) { rejectedQuads++; continue; }
+
+                int mA = GetOrCreateMid(oa,s0,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int mB = GetOrCreateMid(s0,ob,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int mC = GetOrCreateMid(ob,s1,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int mD = GetOrCreateMid(s1,oa,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int center = GetOrCreateMid(mA,mC,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+
+                AddQuadAsTris(next, oa,mA,center,mD);
+                AddQuadAsTris(next, mA,s0,mB,center);
+                AddQuadAsTris(next, center,mB,ob,mC);
+                AddQuadAsTris(next, mD,center,mC,s1);
+
+                used[a.t]=used[b.t]=true; acceptedQuads++;
+            }
+            for (int t=0;t<triCount;t++)
+            {
+                if (used[t]) continue;
+                triFallback++;
+                int i0=indices[t*3],i1=indices[t*3+1],i2=indices[t*3+2];
+                int m01=GetOrCreateMid(i0,i1,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int m12=GetOrCreateMid(i1,i2,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int m20=GetOrCreateMid(i2,i0,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                next.Add(i0); next.Add(m01); next.Add(m20);
+                next.Add(m01); next.Add(i1); next.Add(m12);
+                next.Add(m20); next.Add(m12); next.Add(i2);
+                next.Add(m01); next.Add(m12); next.Add(m20);
+            }
+            rejectedQuads = Math.Max(0, quadCandidates - acceptedQuads);
+            indices = next.ToArray();
+        }
+        return indices;
+    }
+
+    private static void AddTriEdge(Dictionary<long, List<TriRef>> map, int a, int b, int tri, int edge)
+    {
+        int lo=Math.Min(a,b),hi=Math.Max(a,b); long key=((long)lo<<32)|(uint)hi;
+        if(!map.TryGetValue(key,out var list)){list=new List<TriRef>(2); map[key]=list;}
+        list.Add(new TriRef{t=tri,edge=edge});
+    }
+    private static void GetShared(int a0,int a1,int a2,int b0,int b1,int b2,out int s0,out int s1){s0=-1;s1=-1;int[] a={a0,a1,a2};int[] b={b0,b1,b2};foreach(var x in a){if(x==b0||x==b1||x==b2){if(s0<0)s0=x; else{s1=x;return;}}}}
+    private static int GetOther(int a0,int a1,int a2,int s0,int s1){if(a0!=s0&&a0!=s1)return a0; if(a1!=s0&&a1!=s1)return a1; if(a2!=s0&&a2!=s1)return a2; return -1;}
+    private static void AddQuadAsTris(List<int> dst,int q00,int q10,int q11,int q01){dst.Add(q00);dst.Add(q10);dst.Add(q11); dst.Add(q00);dst.Add(q11);dst.Add(q01);}
 
     private static int CountQuadCandidates(int[] srcIndices)
     {
