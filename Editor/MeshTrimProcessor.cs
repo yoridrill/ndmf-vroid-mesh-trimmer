@@ -5,18 +5,17 @@ using UnityEngine.Rendering;
 
 public static class MeshTrimProcessor
 {
-    public enum VertexSourceKind
-    {
-        OriginalVertex,
-        EdgeLerp
-    }
-
     public struct VertexSource
     {
-        public VertexSourceKind kind;
-        public int indexA;
-        public int indexB;
-        public float t;
+        public int index0; public float weight0;
+        public int index1; public float weight1;
+        public int index2; public float weight2;
+        public int index3; public float weight3;
+
+        public static VertexSource Original(int originalIndex)
+        {
+            return new VertexSource { index0 = originalIndex, weight0 = 1f, index1 = -1, index2 = -1, index3 = -1 };
+        }
     }
 
     private class SubMeshTask
@@ -125,13 +124,7 @@ public static class MeshTrimProcessor
         var vertexSources = new List<VertexSource>(vertices.Count);
         for (int v = 0; v < vertices.Count; v++)
         {
-            vertexSources.Add(new VertexSource
-            {
-                kind = VertexSourceKind.OriginalVertex,
-                indexA = v,
-                indexB = -1,
-                t = 0f
-            });
+            vertexSources.Add(VertexSource.Original(v));
         }
 
         bool hasNormals = normals.Count == vertices.Count;
@@ -634,13 +627,7 @@ public static class MeshTrimProcessor
         if (hasUv4) uv4.Add(MeshAttributeInterpolator.Lerp(uv4[a], uv4[b], t));
         if (hasColors) colors.Add(MeshAttributeInterpolator.Lerp(colors[a], colors[b], t));
         if (hasBoneWeights) boneWeights.Add(MeshAttributeInterpolator.Lerp(boneWeights[a], boneWeights[b], t));
-        vertexSources.Add(new VertexSource
-        {
-            kind = VertexSourceKind.EdgeLerp,
-            indexA = a,
-            indexB = b,
-            t = t
-        });
+        vertexSources.Add(LerpVertexSource(vertexSources[a], vertexSources[b], t));
         stats.intersections++;
         return newIndex;
     }
@@ -690,21 +677,9 @@ public static class MeshTrimProcessor
                 for (int i = 0; i < newVertexCount; i++)
                 {
                     VertexSource src = vertexSources[i];
-                    if (src.kind == VertexSourceKind.OriginalVertex)
-                    {
-                        newDeltaVertices[i] = oldDeltaVertices[src.indexA];
-                        newDeltaNormals[i] = oldDeltaNormals[src.indexA];
-                        newDeltaTangents[i] = oldDeltaTangents[src.indexA];
-                    }
-                    else
-                    {
-                        float t = src.t;
-                        int a = src.indexA;
-                        int b = src.indexB;
-                        newDeltaVertices[i] = Vector3.LerpUnclamped(oldDeltaVertices[a], oldDeltaVertices[b], t);
-                        newDeltaNormals[i] = Vector3.LerpUnclamped(oldDeltaNormals[a], oldDeltaNormals[b], t);
-                        newDeltaTangents[i] = Vector3.LerpUnclamped(oldDeltaTangents[a], oldDeltaTangents[b], t);
-                    }
+                    newDeltaVertices[i] = WeightedDelta(oldDeltaVertices, src);
+                    newDeltaNormals[i] = WeightedDelta(oldDeltaNormals, src);
+                    newDeltaTangents[i] = WeightedDelta(oldDeltaTangents, src);
                 }
 
                 newMesh.AddBlendShapeFrame(shapeName, weight, newDeltaVertices, newDeltaNormals, newDeltaTangents);
@@ -713,6 +688,76 @@ public static class MeshTrimProcessor
 
         sw.Stop();
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={rendererName}, Preserve BlendShapes={preserveBlendShapes}, BlendShapeCount={sourceMesh.blendShapeCount}, TotalFrameCount={totalFrames}, ProcessedDeltaVertexCount={newVertexCount}, ElapsedMs={sw.ElapsedMilliseconds}");
+    }
+
+
+    private static Vector3 WeightedDelta(Vector3[] deltas, VertexSource src)
+    {
+        Vector3 v = Vector3.zero;
+        if (src.index0 >= 0 && src.weight0 > 0f) v += deltas[src.index0] * src.weight0;
+        if (src.index1 >= 0 && src.weight1 > 0f) v += deltas[src.index1] * src.weight1;
+        if (src.index2 >= 0 && src.weight2 > 0f) v += deltas[src.index2] * src.weight2;
+        if (src.index3 >= 0 && src.weight3 > 0f) v += deltas[src.index3] * src.weight3;
+        return v;
+    }
+
+    private static VertexSource LerpVertexSource(VertexSource a, VertexSource b, float t)
+    {
+        float wa = 1f - t;
+        float wb = t;
+        int[] idx = { -1, -1, -1, -1 };
+        float[] w = { 0f, 0f, 0f, 0f };
+
+        AddWeighted(ref idx, ref w, a.index0, a.weight0 * wa);
+        AddWeighted(ref idx, ref w, a.index1, a.weight1 * wa);
+        AddWeighted(ref idx, ref w, a.index2, a.weight2 * wa);
+        AddWeighted(ref idx, ref w, a.index3, a.weight3 * wa);
+
+        AddWeighted(ref idx, ref w, b.index0, b.weight0 * wb);
+        AddWeighted(ref idx, ref w, b.index1, b.weight1 * wb);
+        AddWeighted(ref idx, ref w, b.index2, b.weight2 * wb);
+        AddWeighted(ref idx, ref w, b.index3, b.weight3 * wb);
+
+        KeepTop4(ref idx, ref w);
+        Normalize(ref w);
+
+        return new VertexSource { index0 = idx[0], weight0 = w[0], index1 = idx[1], weight1 = w[1], index2 = idx[2], weight2 = w[2], index3 = idx[3], weight3 = w[3] };
+    }
+
+    private static void AddWeighted(ref int[] idx, ref float[] w, int index, float weight)
+    {
+        if (index < 0 || weight <= 0f) return;
+        for (int i = 0; i < 4; i++)
+        {
+            if (idx[i] == index) { w[i] += weight; return; }
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            if (idx[i] < 0) { idx[i] = index; w[i] = weight; return; }
+        }
+        int min = 0;
+        for (int i = 1; i < 4; i++) if (w[i] < w[min]) min = i;
+        if (weight > w[min]) { idx[min] = index; w[min] = weight; }
+    }
+
+    private static void KeepTop4(ref int[] idx, ref float[] w)
+    {
+        for (int i = 0; i < 3; i++)
+        for (int j = i + 1; j < 4; j++)
+        {
+            if (w[j] > w[i])
+            {
+                float tw = w[i]; w[i] = w[j]; w[j] = tw;
+                int ti = idx[i]; idx[i] = idx[j]; idx[j] = ti;
+            }
+        }
+    }
+
+    private static void Normalize(ref float[] w)
+    {
+        float sum = w[0] + w[1] + w[2] + w[3];
+        if (sum <= 0f) return;
+        w[0] /= sum; w[1] /= sum; w[2] /= sum; w[3] /= sum;
     }
 
     private static float[] SaveBlendShapeWeights(SkinnedMeshRenderer renderer, Mesh sourceMesh)
