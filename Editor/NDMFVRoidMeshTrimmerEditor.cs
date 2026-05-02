@@ -99,7 +99,10 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         }
 
         EnsureAutoDetectedTargets(trimmer, false);
-        DrawTargets(serializedObject.FindProperty("targets"), state);
+        if (trimmer.enableTexturePadding)
+        {
+            DrawTargets(serializedObject.FindProperty("targets"), state);
+        }
 
         DrawAdvancedSection(trimmer);
         serializedObject.ApplyModifiedProperties();
