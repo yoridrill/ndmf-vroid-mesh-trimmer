@@ -788,7 +788,10 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
 
                 NDMFVRoidMeshTrimmerEditor.EnsureAutoDetectedTargets(trimmer, false);
                 MeshTrimProcessor.ApplyTrim(trimmer, true);
-                TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
+                if (trimmer.enableTexturePadding)
+                {
+                    TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
+                }
                 executedForCurrentPlatform = true;
             }
 
