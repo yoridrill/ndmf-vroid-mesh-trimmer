@@ -918,6 +918,14 @@ public static class MeshTrimProcessor
     {
         if (cutPointIndex < 0 || cutPointIndex >= uv.Count) return;
         long key = MakeEdgeKey(edgeA, edgeB);
+        for (int i = 0; i < edgeCuts.Count; i++)
+        {
+            if (edgeCuts[i].triangleIndex == triangleIndex && edgeCuts[i].edgeKey == key)
+            {
+                return;
+            }
+        }
+
         edgeCuts.Add(new EdgeCutInfo
         {
             edgeKey = key,
