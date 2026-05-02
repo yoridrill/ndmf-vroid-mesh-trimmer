@@ -736,13 +736,9 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
     protected override void Configure()
     {
         var sequence = InPhase(BuildPhase.Transforming)
-            .AfterPlugin("NDMF VRoid Arm Patch")
-            .BeforePlugin("NDMF MToon10 to lilToon")
-            .BeforePlugin("Meshia Mesh Simplification")
-            .BeforePlugin("KRT.VRCQuestTools.Ndmf.VRCQuestToolsPlugin")
-            .BeforePlugin("KRT.VRCQuestTools.Ndmf.AvatarConverterNdmfPlugin")
-            .BeforePlugin("KRT.VRCQuestTools.AvatarConverter.Ndmf.AvatarConverterPlugin")
-            .BeforePlugin("KRT.VRCQuestTools.Ndmf.MaterialConversionNdmfPlugin");
+            .AfterPlugin("jp.yoridrill.ndmf-vroid-arm-patch")
+            .BeforePlugin("jp.yoridrill.ndmf-mtoon10-to-liltoon")
+            .BeforePlugin("com.github.kurotu.vrc-quest-tools");
 
         sequence.Run("Run NDMF VRoid Mesh Trimmer", context =>
         {

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "fillColors": [
+    {
+      "target": ["eyeline", "アイライン"],
+      "source": ["faceskin", "face_00_skin", "顔"],
+      "uv": [0.4, 0.5]
+    },
+    {
+      "target": ["iris", "瞳"],
+      "source": ["eyewhite", "whiteeye", "白目"],
+      "uv": [0.5, 0.5]
+    },
+    {
+      "target": ["eyehighlight", "ハイライト"],
+      "source": ["iris", "瞳"],
+      "uv": [0.5, 0.5]
+    }
+  ],
+  "preSubdivide": [
+    {
+      "target": ["eyelash", "まつげ", "睫毛"],
+      "level": 1
+    }
+  ]
+}
