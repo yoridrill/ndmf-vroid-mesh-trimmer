@@ -897,8 +897,42 @@ public static class MeshTrimProcessor
         float cutArea = Mathf.Abs(SignedArea(uv[shared], uv[cutA], uv[cutB])) * 0.5f;
         if (cutArea <= trimmer.minTriangleUvArea) return false;
 
-        bool keepSharedCorner = trimmer.bridgeUseNeighborKeptSide;
-        if (!trimmer.bridgeUseNeighborKeptSide)
+        bool keepSharedCorner;
+        if (trimmer.bridgeUseNeighborKeptSide)
+        {
+            int sharedVotes = 0;
+            int oppositeVotes = 0;
+
+            if (h01)
+            {
+                if (c01.edgeA == shared) sharedVotes++;
+                else if (c01.edgeA == other1) oppositeVotes++;
+            }
+            if (h12)
+            {
+                if (c12.edgeA == shared) sharedVotes++;
+                else if (c12.edgeA == other1 || c12.edgeA == other2) oppositeVotes++;
+            }
+            if (h20)
+            {
+                if (c20.edgeA == shared) sharedVotes++;
+                else if (c20.edgeA == other2) oppositeVotes++;
+            }
+
+            if (sharedVotes == oppositeVotes)
+            {
+                // Tie: fallback to UV-area based side selection.
+                float sharedArea = Mathf.Abs(SignedArea(uv[shared], uv[cutA], uv[cutB])) * 0.5f;
+                float totalArea = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f;
+                float oppositeArea = Mathf.Max(0f, totalArea - sharedArea);
+                keepSharedCorner = sharedArea >= oppositeArea;
+            }
+            else
+            {
+                keepSharedCorner = sharedVotes > oppositeVotes;
+            }
+        }
+        else
         {
             // mask-based fallback: keep larger side by UV area proxy
             float sharedArea = Mathf.Abs(SignedArea(uv[shared], uv[cutA], uv[cutB])) * 0.5f;
