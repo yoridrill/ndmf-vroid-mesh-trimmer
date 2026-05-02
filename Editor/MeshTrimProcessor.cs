@@ -744,6 +744,17 @@ public static class MeshTrimProcessor
 
             if (insideCount == 1)
             {
+                if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2 &&
+                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                {
+                    bridgeStats.bridgeCutAppliedCount++;
+                    bridgeStats.replacedClippedResultCount++;
+                    if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
+                    else bridgeStats.keptSideDecidedByMaskCount++;
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
+                    continue;
+                }
+
                 int insideV = -1;
                 int outA = -1;
                 int outB = -1;
@@ -782,6 +793,17 @@ public static class MeshTrimProcessor
             }
             else if (insideCount == 2)
             {
+                if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2 &&
+                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                {
+                    bridgeStats.bridgeCutAppliedCount++;
+                    bridgeStats.replacedClippedResultCount++;
+                    if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
+                    else bridgeStats.keptSideDecidedByMaskCount++;
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
+                    continue;
+                }
+
                 int outsideV = -1;
                 int inA = -1;
                 int inB = -1;
