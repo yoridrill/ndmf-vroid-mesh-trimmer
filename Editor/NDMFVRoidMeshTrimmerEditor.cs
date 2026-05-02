@@ -85,6 +85,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         DrawSetting("bridgeSmallKeptAreaRatio");
         DrawSetting("bridgeSmallRemovedAreaRatio");
         DrawSetting("bridgeUseNeighborKeptSide");
+        bool oldPadding = trimmer.enableTexturePadding;
         EditorGUILayout.PropertyField(serializedObject.FindProperty("enableTexturePadding"), new GUIContent(T("テクスチャの余白を塗り足す", "Pad Texture Transparent Areas")));
 
         if (EditorGUI.EndChangeCheck())
@@ -92,11 +93,13 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             QueuePreviewUpdate(state, PreviewUpdateType.MeshOnly);
         }
 
-        EnsureAutoDetectedTargets(trimmer, false);
-        if (trimmer.enableTexturePadding)
+        if (oldPadding != trimmer.enableTexturePadding)
         {
-            DrawTargets(serializedObject.FindProperty("targets"), state);
+            QueuePreviewUpdate(state, PreviewUpdateType.TextureOnly);
         }
+
+        EnsureAutoDetectedTargets(trimmer, false);
+        DrawTargets(serializedObject.FindProperty("targets"), state);
 
         DrawAdvancedSection(trimmer);
         serializedObject.ApplyModifiedProperties();
@@ -307,6 +310,8 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             EditorGUI.LabelField(materialRect, new GUIContent(materialNames, materialNames));
             EditorGUILayout.EndHorizontal();
 
+            using (new EditorGUI.DisabledScope(!((NDMFVRoidMeshTrimmer)target).enableTexturePadding))
+            {
             EditorGUI.BeginChangeCheck();
             var mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex;
             EditorGUILayout.BeginHorizontal();
@@ -328,6 +333,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
             modeProp.enumValueIndex = (int)mode;
             if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.TextureOnly);
+            }
 
             EditorGUILayout.EndVertical();
             EditorGUILayout.EndHorizontal();
@@ -777,7 +783,7 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
                     continue;
                 }
 
-                NDMFVRoidMeshTrimmerEditor.EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
+                NDMFVRoidMeshTrimmerEditor.EnsureAutoDetectedTargets(trimmer, false);
                 MeshTrimProcessor.ApplyTrim(trimmer, true);
                 TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
                 executedForCurrentPlatform = true;
