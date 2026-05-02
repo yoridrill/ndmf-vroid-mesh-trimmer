@@ -6,7 +6,7 @@ public class UvPickerPopup : PopupWindowContent
 {
     private readonly Texture2D _texture;
     private Vector2? _lastUv;
-    private double _copiedAt;
+    private string _copiedText;
 
     public UvPickerPopup(Texture2D texture)
     {
@@ -34,9 +34,17 @@ public class UvPickerPopup : PopupWindowContent
             return;
         }
 
+        EditorGUILayout.BeginHorizontal();
         EditorGUILayout.LabelField($"{_texture.name} ({_texture.width}x{_texture.height})", EditorStyles.boldLabel);
+        if (GUILayout.Button("×", GUILayout.Width(24f)))
+        {
+            editorWindow.Close();
+            return;
+        }
+        EditorGUILayout.EndHorizontal();
 
-        var imageRect = GUILayoutUtility.GetRect(rect.width - 8f, rect.height - 40f, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
+        const float bottomAreaHeight = 24f;
+        var imageRect = GUILayoutUtility.GetRect(rect.width - 8f, rect.height - 64f, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
         var fittedRect = FitRect(imageRect, _texture.width, _texture.height);
 
         EditorGUI.DrawPreviewTexture(fittedRect, _texture, null, ScaleMode.StretchToFill);
@@ -44,17 +52,30 @@ public class UvPickerPopup : PopupWindowContent
 
         HandleClick(fittedRect);
 
-        if (_lastUv.HasValue)
+        GUILayout.Space(4f);
+        using (new EditorGUILayout.HorizontalScope(GUILayout.Height(bottomAreaHeight)))
         {
-            var uv = _lastUv.Value;
-            EditorGUILayout.LabelField($"\"uv\": [{uv.x:F4}, {uv.y:F4}]", EditorStyles.miniBoldLabel);
+            if (_lastUv.HasValue)
+            {
+                var uv = _lastUv.Value;
+                EditorGUILayout.LabelField($"Selected: \"uv\": [{uv.x:F4}, {uv.y:F4}]", EditorStyles.miniBoldLabel);
+            }
+            else
+            {
+                EditorGUILayout.LabelField("Click image to copy UV", EditorStyles.miniLabel);
+            }
         }
 
-        if (EditorApplication.timeSinceStartup - _copiedAt < 2.0)
+        using (new EditorGUILayout.HorizontalScope(GUILayout.Height(bottomAreaHeight)))
         {
-            var msgRect = new Rect(fittedRect.x + 8f, fittedRect.y + 8f, 180f, 24f);
-            EditorGUI.DrawRect(msgRect, new Color(0f, 0f, 0f, 0.7f));
-            EditorGUI.LabelField(msgRect, "UV coordinate copied!", new GUIStyle(EditorStyles.whiteLabel) { alignment = TextAnchor.MiddleCenter });
+            if (!string.IsNullOrEmpty(_copiedText))
+            {
+                EditorGUILayout.LabelField($"Copied: {_copiedText}", EditorStyles.miniLabel);
+            }
+            else
+            {
+                EditorGUILayout.LabelField(string.Empty, EditorStyles.miniLabel);
+            }
         }
     }
 
@@ -73,8 +94,8 @@ public class UvPickerPopup : PopupWindowContent
         int y = Mathf.Clamp(Mathf.FloorToInt((1f - v) * _texture.height), 0, Mathf.Max(0, _texture.height - 1));
 
         _lastUv = new Vector2(u, v);
-        EditorGUIUtility.systemCopyBuffer = $"\"uv\": [{u:F4}, {v:F4}]";
-        _copiedAt = EditorApplication.timeSinceStartup;
+        _copiedText = $"\"uv\": [{u:F4}, {v:F4}]";
+        EditorGUIUtility.systemCopyBuffer = _copiedText;
 
         Debug.Log($"[NDMF VRoid Mesh Trimmer] UV copied. Texture={_texture.name}, UV=({u:F4}, {v:F4}), Pixel=({x}, {y})");
         editorWindow.Repaint();
