@@ -744,17 +744,6 @@ public static class MeshTrimProcessor
 
             if (insideCount == 1)
             {
-                if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2 &&
-                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
-                {
-                    bridgeStats.bridgeCutAppliedCount++;
-                    bridgeStats.replacedClippedResultCount++;
-                    if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
-                    else bridgeStats.keptSideDecidedByMaskCount++;
-                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
-                    continue;
-                }
-
                 int insideV = -1;
                 int outA = -1;
                 int outB = -1;
@@ -788,12 +777,7 @@ public static class MeshTrimProcessor
 
                 AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
                 AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
-                AddTrianglePreserveWinding(dstIndices, i0, i1, i2, insideV, cutA, cutB, vertices, uv, trimmer, ref stats);
-                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.33f, 2));
-            }
-            else if (insideCount == 2)
-            {
-                if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2 &&
+                if (trimmer.enableBridgeCut && CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
                     TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
                 {
                     bridgeStats.bridgeCutAppliedCount++;
@@ -803,7 +787,11 @@ public static class MeshTrimProcessor
                     triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
                     continue;
                 }
-
+                AddTrianglePreserveWinding(dstIndices, i0, i1, i2, insideV, cutA, cutB, vertices, uv, trimmer, ref stats);
+                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.33f, 2));
+            }
+            else if (insideCount == 2)
+            {
                 int outsideV = -1;
                 int inA = -1;
                 int inB = -1;
@@ -837,6 +825,16 @@ public static class MeshTrimProcessor
 
                 AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
                 AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
+                if (trimmer.enableBridgeCut && CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
+                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                {
+                    bridgeStats.bridgeCutAppliedCount++;
+                    bridgeStats.replacedClippedResultCount++;
+                    if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
+                    else bridgeStats.keptSideDecidedByMaskCount++;
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
+                    continue;
+                }
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, inA, inB, cutA, vertices, uv, trimmer, ref stats);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, inB, cutB, cutA, vertices, uv, trimmer, ref stats);
                 triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.66f, 2));
@@ -939,7 +937,6 @@ public static class MeshTrimProcessor
         for (int i=0;i<edgeCuts.Count;i++)
         {
             var c=edgeCuts[i];
-            if (c.triangleIndex==triIndex) continue;
             if (!h01 && c.edgeKey==e01){c01=c;h01=true;}
             else if (!h12 && c.edgeKey==e12){c12=c;h12=true;}
             else if (!h20 && c.edgeKey==e20){c20=c;h20=true;}
