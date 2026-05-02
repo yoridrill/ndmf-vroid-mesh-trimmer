@@ -570,8 +570,19 @@ public static class MeshTrimProcessor
                     stats.allInsideButInteriorOutside++;
                 }
 
-                AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongKeep, i0, i1, i2, uv, 1f, 0));
+                if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2 && TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                {
+                    bridgeStats.bridgeCutAppliedCount++;
+                    bridgeStats.replacedClippedResultCount++;
+                    if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
+                    else bridgeStats.keptSideDecidedByMaskCount++;
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
+                }
+                else
+                {
+                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongKeep, i0, i1, i2, uv, 1f, 0));
+                }
                 continue;
             }
 
@@ -612,8 +623,19 @@ public static class MeshTrimProcessor
                     }
                     else
                     {
-                        stats.removedTriangles++;
-                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
+                        if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2 && TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                        {
+                            bridgeStats.bridgeCutAppliedCount++;
+                            bridgeStats.replacedClippedResultCount++;
+                            if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
+                            else bridgeStats.keptSideDecidedByMaskCount++;
+                            triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
+                        }
+                        else
+                        {
+                            stats.removedTriangles++;
+                            triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
+                        }
                     }
                     continue;
                 }
