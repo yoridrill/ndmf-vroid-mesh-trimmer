@@ -43,8 +43,8 @@ public class UvPickerPopup : PopupWindowContent
         }
         EditorGUILayout.EndHorizontal();
 
-        const float bottomAreaHeight = 24f;
-        var imageRect = GUILayoutUtility.GetRect(rect.width - 8f, rect.height - 64f, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
+        const float bottomAreaHeight = 18f;
+        var imageRect = GUILayoutUtility.GetRect(rect.width - 8f, rect.height - 52f, GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
         var fittedRect = FitRect(imageRect, _texture.width, _texture.height);
 
         EditorGUI.DrawPreviewTexture(fittedRect, _texture, null, ScaleMode.StretchToFill);
@@ -52,31 +52,15 @@ public class UvPickerPopup : PopupWindowContent
 
         HandleClick(fittedRect);
 
-        GUILayout.Space(4f);
-        using (new EditorGUILayout.HorizontalScope(GUILayout.Height(bottomAreaHeight)))
-        {
-            if (_lastUv.HasValue)
-            {
-                var uv = _lastUv.Value;
-                EditorGUILayout.LabelField($"Selected: \"uv\": [{uv.x:F4}, {uv.y:F4}]", EditorStyles.miniBoldLabel);
-            }
-            else
-            {
-                EditorGUILayout.LabelField("Click image to copy UV", EditorStyles.miniLabel);
-            }
-        }
+        GUILayout.Space(2f);
+        var statusStyle = new GUIStyle(EditorStyles.miniLabel) { clipping = TextClipping.Clip, wordWrap = false };
+        string selectedText = _lastUv.HasValue
+            ? $"Selected: \"uv\": [{_lastUv.Value.x:F4}, {_lastUv.Value.y:F4}]"
+            : "Click image to copy UV";
+        EditorGUILayout.LabelField(selectedText, statusStyle, GUILayout.Height(bottomAreaHeight));
 
-        using (new EditorGUILayout.HorizontalScope(GUILayout.Height(bottomAreaHeight)))
-        {
-            if (!string.IsNullOrEmpty(_copiedText))
-            {
-                EditorGUILayout.LabelField($"Copied: {_copiedText}", EditorStyles.miniLabel);
-            }
-            else
-            {
-                EditorGUILayout.LabelField(string.Empty, EditorStyles.miniLabel);
-            }
-        }
+        string copiedText = string.IsNullOrEmpty(_copiedText) ? string.Empty : $"Copied: {_copiedText}";
+        EditorGUILayout.LabelField(copiedText, statusStyle, GUILayout.Height(bottomAreaHeight));
     }
 
     private void HandleClick(Rect imageRect)

@@ -279,11 +279,6 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             if (tex != null)
             {
                 bool hovered = previewRect.Contains(Event.current.mousePosition);
-                if (hovered)
-                {
-                    EditorGUI.DrawRect(previewRect, new Color(0.2f, 0.6f, 1f, 0.18f));
-                }
-
                 EditorGUI.DrawPreviewTexture(previewRect, tex, null, ScaleMode.ScaleToFit);
                 EditorGUIUtility.AddCursorRect(previewRect, MouseCursor.Link);
                 if (hovered && Event.current.type == EventType.MouseDown && Event.current.button == 0)
