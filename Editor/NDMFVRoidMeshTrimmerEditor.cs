@@ -467,7 +467,19 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         {
             var r = kv.Value;
             if (r.renderer == null || r.originalSharedMesh == null) continue;
-            r.renderer.sharedMesh = r.originalSharedMesh;
+
+            if (r.previewMesh != null && r.previewMesh != r.originalSharedMesh)
+            {
+                UnityEngine.Object.DestroyImmediate(r.previewMesh);
+                r.previewMesh = null;
+            }
+
+            // Never operate on the original model mesh instance during preview.
+            // Prepare a disposable working copy, then let the trim processor build preview output from it.
+            var working = UnityEngine.Object.Instantiate(r.originalSharedMesh);
+            working.name = r.originalSharedMesh.name + " (NDMF VRoid Mesh Trimmer Working)";
+            working.hideFlags = HideFlags.HideAndDontSave;
+            r.renderer.sharedMesh = working;
         }
 
         MeshTrimProcessor.ApplyTrim(trimmer, false);
