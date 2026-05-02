@@ -24,6 +24,7 @@ public static class MeshTrimProcessor
         public Texture2D texture;
         public bool enablePreSubdivide;
         public int preSubdivideLevel;
+        public bool preSubdivideQuadAware;
     }
 
     private struct TrimStats
@@ -98,6 +99,7 @@ public static class MeshTrimProcessor
                 existingTask.texture = target.mainTexture;
                 existingTask.enablePreSubdivide = existingTask.enablePreSubdivide || target.enablePreSubdivide;
                 existingTask.preSubdivideLevel = Mathf.Max(existingTask.preSubdivideLevel, target.preSubdivideLevel);
+                existingTask.preSubdivideQuadAware = existingTask.preSubdivideQuadAware || target.preSubdivideQuadAware;
             }
         }
 
@@ -167,9 +169,19 @@ public static class MeshTrimProcessor
             int[] workingIndices = srcIndices;
             int triBeforeSub = srcIndices.Length / 3;
             int preAddedVertices = 0;
+            int quadCandidates = 0;
+            int acceptedQuads = 0;
+            int rejectedQuads = 0;
+            int triFallback = 0;
             var swPre = System.Diagnostics.Stopwatch.StartNew();
             if (task.enablePreSubdivide && task.preSubdivideLevel > 0)
             {
+                if (task.preSubdivideQuadAware)
+                {
+                    quadCandidates = CountQuadCandidates(srcIndices);
+                    rejectedQuads = quadCandidates;
+                    triFallback = triBeforeSub;
+                }
                 workingIndices = PreSubdivideIndices(srcIndices, task.preSubdivideLevel, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref preAddedVertices);
             }
             swPre.Stop();
@@ -200,7 +212,7 @@ public static class MeshTrimProcessor
             stats.addedVertices = vertices.Count - baseVertexCount;
             baseVertexCount = vertices.Count;
 
-            Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={renderer.name}, SubMesh={sub}, Texture={task.texture.name}, PreSubdivideEnabled={task.enablePreSubdivide}, PreSubdivideLevel={task.preSubdivideLevel}, TrianglesBeforePreSubdivide={triBeforeSub}, TrianglesAfterPreSubdivide={workingIndices.Length / 3}, PreSubdivideAddedVertices={preAddedVertices}, PreSubdivideMs={swPre.ElapsedMilliseconds}, " +
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={renderer.name}, SubMesh={sub}, Texture={task.texture.name}, PreSubdivideEnabled={task.enablePreSubdivide}, PreSubdivideLevel={task.preSubdivideLevel}, QuadAware={task.preSubdivideQuadAware}, QuadCandidates={quadCandidates}, AcceptedQuads={acceptedQuads}, RejectedQuadCandidates={rejectedQuads}, TriangleFallbackCount={triFallback}, TrianglesBeforePreSubdivide={triBeforeSub}, TrianglesAfterPreSubdivide={workingIndices.Length / 3}, PreSubdivideAddedVertices={preAddedVertices}, PreSubdivideMs={swPre.ElapsedMilliseconds}, " +
                       $"OriginalTriangles={stats.originalTriangles}, OutputTriangles={stats.outputTriangles}, RemovedTriangles={stats.removedTriangles}, " +
                       $"AddedVertices={stats.addedVertices}, Intersections={stats.intersections}, " +
                       $"AllInsideButInteriorOutside={stats.allInsideButInteriorOutside}, AllOutsideButInteriorInside={stats.allOutsideButInteriorInside}, " +
@@ -294,6 +306,34 @@ public static class MeshTrimProcessor
         TrimStats dummy = default;
         idx = AddInterpolatedVertex(a,b,0.5f,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources, ref dummy);
         cache[key]=idx; addedVertices++; return idx;
+    }
+
+
+    private static int CountQuadCandidates(int[] srcIndices)
+    {
+        var edgeCount = new Dictionary<long, int>();
+        for (int i = 0; i < srcIndices.Length; i += 3)
+        {
+            AddEdge(edgeCount, srcIndices[i], srcIndices[i + 1]);
+            AddEdge(edgeCount, srcIndices[i + 1], srcIndices[i + 2]);
+            AddEdge(edgeCount, srcIndices[i + 2], srcIndices[i]);
+        }
+
+        int candidates = 0;
+        foreach (var kv in edgeCount)
+        {
+            if (kv.Value == 2) candidates++;
+        }
+
+        return candidates;
+    }
+
+    private static void AddEdge(Dictionary<long, int> map, int a, int b)
+    {
+        int lo = Math.Min(a, b), hi = Math.Max(a, b);
+        long key = ((long)lo << 32) | (uint)hi;
+        if (map.TryGetValue(key, out int c)) map[key] = c + 1;
+        else map[key] = 1;
     }
 
     private static TrimStats ProcessSubMesh(

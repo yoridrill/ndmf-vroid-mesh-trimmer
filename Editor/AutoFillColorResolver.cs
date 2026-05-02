@@ -30,6 +30,7 @@ public static class AutoFillColorResolver
     {
         public string[] target;
         public int level;
+        public bool quadAware;
     }
 
     private enum ConfigSource
@@ -95,14 +96,16 @@ public static class AutoFillColorResolver
             if (target == null || target.usages == null) continue;
             target.enablePreSubdivide = false;
             target.preSubdivideLevel = 0;
+            target.preSubdivideQuadAware = false;
             foreach (var rule in config.preSubdivide)
             {
                 if (rule == null || rule.target == null) continue;
                 if (!TryMatchTarget(target, rule.target)) continue;
                 target.enablePreSubdivide = rule.level > 0;
                 target.preSubdivideLevel = Mathf.Clamp(rule.level, 0, 2);
+                target.preSubdivideQuadAware = rule.quadAware;
                 matched++;
-                Debug.Log($"[NDMF VRoid Mesh Trimmer] Auto preSubdivide matched. TargetMaterial={GetFirstUsageMaterialName(target)}, Level={target.preSubdivideLevel}");
+                Debug.Log($"[NDMF VRoid Mesh Trimmer] Auto preSubdivide matched. TargetMaterial={GetFirstUsageMaterialName(target)}, Level={target.preSubdivideLevel}, QuadAware={target.preSubdivideQuadAware}");
                 break;
             }
         }
