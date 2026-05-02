@@ -276,7 +276,22 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             EditorGUILayout.BeginHorizontal();
 
             var previewRect = GUILayoutUtility.GetRect(previewSize, previewSize, GUILayout.Width(previewSize), GUILayout.Height(previewSize));
-            if (tex != null) EditorGUI.DrawPreviewTexture(previewRect, tex, null, ScaleMode.ScaleToFit);
+            if (tex != null)
+            {
+                bool hovered = previewRect.Contains(Event.current.mousePosition);
+                if (hovered)
+                {
+                    EditorGUI.DrawRect(previewRect, new Color(0.2f, 0.6f, 1f, 0.18f));
+                }
+
+                EditorGUI.DrawPreviewTexture(previewRect, tex, null, ScaleMode.ScaleToFit);
+                EditorGUIUtility.AddCursorRect(previewRect, MouseCursor.Link);
+                if (hovered && Event.current.type == EventType.MouseDown && Event.current.button == 0)
+                {
+                    PopupWindow.Show(previewRect, new UvPickerPopup(tex));
+                    Event.current.Use();
+                }
+            }
             else EditorGUI.HelpBox(previewRect, "No Tex", MessageType.None);
 
             EditorGUILayout.BeginVertical();
