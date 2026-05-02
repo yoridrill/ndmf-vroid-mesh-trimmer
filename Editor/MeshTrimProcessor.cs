@@ -57,6 +57,7 @@ public static class MeshTrimProcessor
 
     private struct BridgeStats
     {
+        public int totalTriangles;
         public int bridgeCandidatesCount;
         public int ambiguousBridgeCandidates;
         public int smallKeptAreaBridgeCandidates;
@@ -782,6 +783,7 @@ public static class MeshTrimProcessor
         }
 
         stats.outputTriangles = dstIndices.Count / 3;
+        bridgeStats.totalTriangles = srcIndices.Length / 3;
         if (trimmer.enableBridgeCut)
         {
         for (int i = 0; i < triangleResults.Count; i++)
@@ -800,7 +802,7 @@ public static class MeshTrimProcessor
             bridgeStats.bridgeCutRejectedCount = bridgeStats.bridgeCandidatesCount;
         }
         }
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, Candidates={bridgeStats.bridgeCandidatesCount}, Ambiguous={bridgeStats.ambiguousBridgeCandidates}, SmallKept={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemoved={bridgeStats.smallRemovedAreaBridgeCandidates}, Applied={bridgeStats.bridgeCutAppliedCount}, Rejected={bridgeStats.bridgeCutRejectedCount}, ReplacedClipped={bridgeStats.replacedClippedResultCount}, DecidedByNeighbor={bridgeStats.keptSideDecidedByNeighborCount}, DecidedByMask={bridgeStats.keptSideDecidedByMaskCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, TotalTriangles={bridgeStats.totalTriangles}, BridgeCandidatesCount={bridgeStats.bridgeCandidatesCount}, AmbiguousBridgeCandidates={bridgeStats.ambiguousBridgeCandidates}, SmallKeptAreaBridgeCandidates={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemovedAreaBridgeCandidates={bridgeStats.smallRemovedAreaBridgeCandidates}, BridgeCutAppliedCount={bridgeStats.bridgeCutAppliedCount}, BridgeCutRejectedCount={bridgeStats.bridgeCutRejectedCount}, ReplacedClippedResultCount={bridgeStats.replacedClippedResultCount}, KeptSideDecidedByNeighborCount={bridgeStats.keptSideDecidedByNeighborCount}, KeptSideDecidedByMaskCount={bridgeStats.keptSideDecidedByMaskCount}");
         return stats;
     }
 
