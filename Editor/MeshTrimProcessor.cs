@@ -913,9 +913,10 @@ public static class MeshTrimProcessor
         if (hits<2) return false;
 
         int cutA=-1, cutB=-1, shared=-1, other1=-1, other2=-1;
-        if (h01 && h20){cutA=c01.cutPointIndex;cutB=c20.cutPointIndex;shared=i0;other1=i1;other2=i2;}
-        else if (h01 && h12){cutA=c01.cutPointIndex;cutB=c12.cutPointIndex;shared=i1;other1=i0;other2=i2;}
-        else if (h12 && h20){cutA=c12.cutPointIndex;cutB=c20.cutPointIndex;shared=i2;other1=i1;other2=i0;}
+        EdgeCutInfo sideA = default, sideB = default;
+        if (h01 && h20){cutA=c01.cutPointIndex;cutB=c20.cutPointIndex;sideA=c01;sideB=c20;shared=i0;other1=i1;other2=i2;}
+        else if (h01 && h12){cutA=c01.cutPointIndex;cutB=c12.cutPointIndex;sideA=c01;sideB=c12;shared=i1;other1=i0;other2=i2;}
+        else if (h12 && h20){cutA=c12.cutPointIndex;cutB=c20.cutPointIndex;sideA=c12;sideB=c20;shared=i2;other1=i1;other2=i0;}
         else return false;
         if (cutA<0||cutB<0||cutA>=uv.Count||cutB>=uv.Count) return false;
 
@@ -930,21 +931,11 @@ public static class MeshTrimProcessor
             int sharedVotes = 0;
             int oppositeVotes = 0;
 
-            if (h01)
-            {
-                if (c01.edgeA == shared) sharedVotes++;
-                else if (c01.edgeA == other1) oppositeVotes++;
-            }
-            if (h12)
-            {
-                if (c12.edgeA == shared) sharedVotes++;
-                else if (c12.edgeA == other1 || c12.edgeA == other2) oppositeVotes++;
-            }
-            if (h20)
-            {
-                if (c20.edgeA == shared) sharedVotes++;
-                else if (c20.edgeA == other2) oppositeVotes++;
-            }
+            if (sideA.edgeA == shared) sharedVotes++;
+            else if (sideA.edgeA == other1 || sideA.edgeA == other2) oppositeVotes++;
+
+            if (sideB.edgeA == shared) sharedVotes++;
+            else if (sideB.edgeA == other1 || sideB.edgeA == other2) oppositeVotes++;
 
             if (sharedVotes == oppositeVotes)
             {
