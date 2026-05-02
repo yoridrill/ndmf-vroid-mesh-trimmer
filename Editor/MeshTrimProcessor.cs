@@ -782,6 +782,8 @@ public static class MeshTrimProcessor
         }
 
         stats.outputTriangles = dstIndices.Count / 3;
+        if (trimmer.enableBridgeCut)
+        {
         for (int i = 0; i < triangleResults.Count; i++)
         {
             var r = triangleResults[i];
@@ -797,7 +799,8 @@ public static class MeshTrimProcessor
         {
             bridgeStats.bridgeCutRejectedCount = bridgeStats.bridgeCandidatesCount;
         }
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Candidates={bridgeStats.bridgeCandidatesCount}, Ambiguous={bridgeStats.ambiguousBridgeCandidates}, SmallKept={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemoved={bridgeStats.smallRemovedAreaBridgeCandidates}, Applied={bridgeStats.bridgeCutAppliedCount}, Rejected={bridgeStats.bridgeCutRejectedCount}, ReplacedClipped={bridgeStats.replacedClippedResultCount}, DecidedByNeighbor={bridgeStats.keptSideDecidedByNeighborCount}, DecidedByMask={bridgeStats.keptSideDecidedByMaskCount}");
+        }
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, Candidates={bridgeStats.bridgeCandidatesCount}, Ambiguous={bridgeStats.ambiguousBridgeCandidates}, SmallKept={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemoved={bridgeStats.smallRemovedAreaBridgeCandidates}, Applied={bridgeStats.bridgeCutAppliedCount}, Rejected={bridgeStats.bridgeCutRejectedCount}, ReplacedClipped={bridgeStats.replacedClippedResultCount}, DecidedByNeighbor={bridgeStats.keptSideDecidedByNeighborCount}, DecidedByMask={bridgeStats.keptSideDecidedByMaskCount}");
         return stats;
     }
 
