@@ -560,6 +560,7 @@ public static class MeshTrimProcessor
             bool centroidIn = AlphaMaskProcessor.SampleMask(maskData, centroid);
 
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
+            int neighborCutEdgeCount = CountNeighborCutEdges(edgeCuts, i0, i1, i2);
 
             if (insideCount == 3)
             {
@@ -585,7 +586,7 @@ public static class MeshTrimProcessor
                 {
                     if (centroidIn)
                     {
-                        if (trimmer.enableBridgeCut)
+                        if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2)
                         {
                             stats.removedTriangles++;
                             bridgeStats.bridgeCutAppliedCount++;
@@ -619,7 +620,7 @@ public static class MeshTrimProcessor
                     }
                     else
                     {
-                        if (trimmer.enableBridgeCut)
+                        if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2)
                         {
                             AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
                             bridgeStats.bridgeCutAppliedCount++;
@@ -817,12 +818,36 @@ public static class MeshTrimProcessor
 
 
 
+
+    private static int CountNeighborCutEdges(List<EdgeCutInfo> edgeCuts, int i0, int i1, int i2)
+    {
+        if (edgeCuts == null || edgeCuts.Count == 0) return 0;
+        long e01 = MakeEdgeKey(i0, i1);
+        long e12 = MakeEdgeKey(i1, i2);
+        long e20 = MakeEdgeKey(i2, i0);
+        bool h01 = false, h12 = false, h20 = false;
+        for (int i = 0; i < edgeCuts.Count; i++)
+        {
+            long k = edgeCuts[i].edgeKey;
+            if (k == e01) h01 = true;
+            else if (k == e12) h12 = true;
+            else if (k == e20) h20 = true;
+        }
+
+        return (h01 ? 1 : 0) + (h12 ? 1 : 0) + (h20 ? 1 : 0);
+    }
+
+    private static long MakeEdgeKey(int a, int b)
+    {
+        int lo = Math.Min(a, b);
+        int hi = Math.Max(a, b);
+        return ((long)lo << 32) | (uint)hi;
+    }
+
     private static void AddEdgeCut(List<EdgeCutInfo> edgeCuts, int triangleIndex, int edgeA, int edgeB, int cutPointIndex, List<Vector2> uv)
     {
         if (cutPointIndex < 0 || cutPointIndex >= uv.Count) return;
-        int lo = Math.Min(edgeA, edgeB);
-        int hi = Math.Max(edgeA, edgeB);
-        long key = ((long)lo << 32) | (uint)hi;
+        long key = MakeEdgeKey(edgeA, edgeB);
         edgeCuts.Add(new EdgeCutInfo
         {
             edgeKey = key,
