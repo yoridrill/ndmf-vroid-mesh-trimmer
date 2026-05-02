@@ -92,9 +92,9 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             QueuePreviewUpdate(state, PreviewUpdateType.MeshOnly);
         }
 
+        EnsureAutoDetectedTargets(trimmer, false);
         if (trimmer.enableTexturePadding)
         {
-            EnsureAutoDetectedTargets(trimmer, false);
             DrawTargets(serializedObject.FindProperty("targets"), state);
         }
 
