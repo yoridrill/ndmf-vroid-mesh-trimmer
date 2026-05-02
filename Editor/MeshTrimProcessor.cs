@@ -317,6 +317,7 @@ public static class MeshTrimProcessor
 
 
     private struct TriRef { public int t; public int edge; }
+    private struct QuadCandidate { public int triA; public int triB; public int v0; public int v1; public int v2; public int v3; public float score; }
 
     private static int[] PreSubdivideIndicesQuadAware(
         int[] srcIndices, int level,
@@ -326,47 +327,56 @@ public static class MeshTrimProcessor
     {
         int[] indices = srcIndices;
         quadCandidates = 0; acceptedQuads = 0; rejectedQuads = 0; triFallback = 0;
+        int rejZero = 0, rejSelf = 0, rejWind = 0;
         for (int lv = 0; lv < level; lv++)
         {
-            var edgeMap = new Dictionary<long, List<TriRef>>();
             int triCount = indices.Length / 3;
+            var edgeMap = new Dictionary<long, List<int>>();
             for (int t = 0; t < triCount; t++)
             {
                 int i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
-                AddTriEdge(edgeMap, i0, i1, t, 0);
-                AddTriEdge(edgeMap, i1, i2, t, 1);
-                AddTriEdge(edgeMap, i2, i0, t, 2);
+                AddTriEdgeIndex(edgeMap, i0, i1, t);
+                AddTriEdgeIndex(edgeMap, i1, i2, t);
+                AddTriEdgeIndex(edgeMap, i2, i0, t);
             }
 
-            var used = new bool[triCount];
-            var cache = new Dictionary<long,int>();
-            var next = new List<int>(indices.Length*4);
+            var candidates = new List<QuadCandidate>();
             foreach (var kv in edgeMap)
             {
                 if (kv.Value.Count != 2) continue;
-                quadCandidates++;
-                var a = kv.Value[0]; var b = kv.Value[1];
-                if (used[a.t] || used[b.t]) { rejectedQuads++; continue; }
-                int a0=indices[a.t*3],a1=indices[a.t*3+1],a2=indices[a.t*3+2];
-                int b0=indices[b.t*3],b1=indices[b.t*3+1],b2=indices[b.t*3+2];
-                int s0,s1; GetShared(a0,a1,a2,b0,b1,b2,out s0,out s1);
-                int oa=GetOther(a0,a1,a2,s0,s1), ob=GetOther(b0,b1,b2,s0,s1);
-                if (oa<0||ob<0) { rejectedQuads++; continue; }
-                if (!IsSafeQuadUv(uv[oa], uv[s0], uv[ob], uv[s1])) { rejectedQuads++; continue; }
-
-                int mA = GetOrCreateMid(oa,s0,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
-                int mB = GetOrCreateMid(s0,ob,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
-                int mC = GetOrCreateMid(ob,s1,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
-                int mD = GetOrCreateMid(s1,oa,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
-                int center = GetOrCreateMid(mA,mC,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
-
-                AddQuadAsTris(next, oa,mA,center,mD);
-                AddQuadAsTris(next, mA,s0,mB,center);
-                AddQuadAsTris(next, center,mB,ob,mC);
-                AddQuadAsTris(next, mD,center,mC,s1);
-
-                used[a.t]=used[b.t]=true; acceptedQuads++;
+                int ta = kv.Value[0], tb = kv.Value[1];
+                int a0=indices[ta*3],a1=indices[ta*3+1],a2=indices[ta*3+2];
+                int b0=indices[tb*3],b1=indices[tb*3+1],b2=indices[tb*3+2];
+                if (!TryBuildRelaxedQuad(a0,a1,a2,b0,b1,b2,uv,out int q0,out int q1,out int q2,out int q3,out float score,out int rej))
+                {
+                    if (rej==1) rejZero++; else if (rej==2) rejSelf++; else rejWind++;
+                    continue;
+                }
+                candidates.Add(new QuadCandidate{triA=ta,triB=tb,v0=q0,v1=q1,v2=q2,v3=q3,score=score});
             }
+
+            candidates.Sort((x,y)=>y.score.CompareTo(x.score));
+            quadCandidates = candidates.Count;
+            var used = new bool[triCount];
+            var cache = new Dictionary<long,int>();
+            var next = new List<int>(indices.Length*4);
+
+            foreach (var c in candidates)
+            {
+                if (used[c.triA] || used[c.triB]) continue;
+                int q0=c.v0,q1=c.v1,q2=c.v2,q3=c.v3;
+                int m01 = GetOrCreateMid(q0,q1,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int m12 = GetOrCreateMid(q1,q2,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int m23 = GetOrCreateMid(q2,q3,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int m30 = GetOrCreateMid(q3,q0,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int center = GetOrCreateMid(m01,m23,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                AddQuadAsTris(next,q0,m01,center,m30);
+                AddQuadAsTris(next,m01,q1,m12,center);
+                AddQuadAsTris(next,center,m12,q2,m23);
+                AddQuadAsTris(next,m30,center,m23,q3);
+                used[c.triA]=used[c.triB]=true; acceptedQuads++;
+            }
+
             for (int t=0;t<triCount;t++)
             {
                 if (used[t]) continue;
@@ -381,11 +391,42 @@ public static class MeshTrimProcessor
                 next.Add(m01); next.Add(m12); next.Add(m20);
             }
             rejectedQuads = Math.Max(0, quadCandidates - acceptedQuads);
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] QuadRelaxed stats: TotalTriangles={triCount}, QuadCandidates={quadCandidates}, AcceptedQuads={acceptedQuads}, RejectedByZeroArea={rejZero}, RejectedBySelfIntersection={rejSelf}, RejectedByInvalidWinding={rejWind}, FallbackTriangles={triFallback}");
             indices = next.ToArray();
         }
         return indices;
     }
 
+    private static void AddTriEdgeIndex(Dictionary<long, List<int>> map, int a, int b, int tri)
+    {
+        int lo=Math.Min(a,b),hi=Math.Max(a,b); long key=((long)lo<<32)|(uint)hi;
+        if(!map.TryGetValue(key,out var list)){list=new List<int>(2); map[key]=list;}
+        if (!list.Contains(tri)) list.Add(tri);
+    }
+
+    private static bool TryBuildRelaxedQuad(int a0,int a1,int a2,int b0,int b1,int b2,List<Vector2> uv,out int q0,out int q1,out int q2,out int q3,out float score,out int reject)
+    {
+        q0=q1=q2=q3=-1; score=0f; reject=0;
+        var uniq = new List<int>(4);
+        AddUnique(uniq,a0); AddUnique(uniq,a1); AddUnique(uniq,a2); AddUnique(uniq,b0); AddUnique(uniq,b1); AddUnique(uniq,b2);
+        if (uniq.Count != 4) { reject=3; return false; }
+        float ta = Mathf.Abs(SignedArea(uv[a0],uv[a1],uv[a2]));
+        float tb = Mathf.Abs(SignedArea(uv[b0],uv[b1],uv[b2]));
+        if (ta < 1e-8f || tb < 1e-8f) { reject=1; return false; }
+        var center = (uv[uniq[0]]+uv[uniq[1]]+uv[uniq[2]]+uv[uniq[3]])*0.25f;
+        uniq.Sort((i,j)=>Mathf.Atan2(uv[i].y-center.y,uv[i].x-center.x).CompareTo(Mathf.Atan2(uv[j].y-center.y,uv[j].x-center.x)));
+        q0=uniq[0]; q1=uniq[1]; q2=uniq[2]; q3=uniq[3];
+        float area = SignedArea(uv[q0],uv[q1],uv[q2])+SignedArea(uv[q0],uv[q2],uv[q3]);
+        if (Mathf.Abs(area) < 1e-8f) { reject=1; return false; }
+        if (area < 0f) { int t=q1; q1=q3; q3=t; }
+        if (SegmentsIntersect(uv[q0],uv[q1],uv[q2],uv[q3])) { reject=2; return false; }
+        float quadArea = Mathf.Abs(SignedArea(uv[q0],uv[q1],uv[q2])) + Mathf.Abs(SignedArea(uv[q0],uv[q2],uv[q3]));
+        float balance = Mathf.Min(ta,tb)/Mathf.Max(ta,tb);
+        score = quadArea * (0.5f + 0.5f*balance);
+        return true;
+    }
+
+    private static void AddUnique(List<int> list, int v){ if (!list.Contains(v)) list.Add(v); }
 
     private static bool IsSafeQuadUv(Vector2 q00, Vector2 q10, Vector2 q11, Vector2 q01)
     {
