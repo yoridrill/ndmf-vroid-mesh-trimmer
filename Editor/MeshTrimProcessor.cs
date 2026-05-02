@@ -821,6 +821,33 @@ public static class MeshTrimProcessor
             }
         }
 
+        // Pass2: revisit removed/ambiguous triangles after all edge cuts are known.
+        // This fills bridge candidates that were not decidable during pass1 due to processing order.
+        if (trimmer.enableBridgeCut)
+        {
+            for (int i = 0; i < triangleResults.Count; i++)
+            {
+                var r = triangleResults[i];
+                if (r.keptAreaRatio > 0f) continue;
+                if (r.state != TriangleTrimState.Ambiguous && r.state != TriangleTrimState.StrongTrim) continue;
+
+                int triBase = r.triangleIndex * 3;
+                if (triBase < 0 || triBase + 2 >= srcIndices.Length) continue;
+                int ti0 = srcIndices[triBase];
+                int ti1 = srcIndices[triBase + 1];
+                int ti2 = srcIndices[triBase + 2];
+                if (CountNeighborCutEdges(edgeCuts, ti0, ti1, ti2) < 2) continue;
+
+                if (TryBridgeCutAmbiguousTriangle(r.triangleIndex, ti0, ti1, ti2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                {
+                    bridgeStats.bridgeCutAppliedCount++;
+                    bridgeStats.replacedClippedResultCount++;
+                    if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
+                    else bridgeStats.keptSideDecidedByMaskCount++;
+                }
+            }
+        }
+
         stats.outputTriangles = dstIndices.Count / 3;
         bridgeStats.totalTriangles = srcIndices.Length / 3;
         if (trimmer.enableBridgeCut)
