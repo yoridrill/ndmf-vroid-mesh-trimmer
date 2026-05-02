@@ -447,6 +447,13 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             EditorUtility.SetDirty(trimmer);
             state.failed = false;
         }
+        catch (Exception ex)
+        {
+            Debug.LogError($"[NDMF VRoid Mesh Trimmer][Preview] Failed and restoring originals. {ex}");
+            RestoreOriginalsFromRecovery(trimmer);
+            state.active = false;
+            state.failed = true;
+        }
         finally
         {
             state.processing = false;
