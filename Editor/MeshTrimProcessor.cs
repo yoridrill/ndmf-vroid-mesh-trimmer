@@ -844,6 +844,13 @@ public static class MeshTrimProcessor
                     bridgeStats.replacedClippedResultCount++;
                     if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
                     else bridgeStats.keptSideDecidedByMaskCount++;
+
+                    // Reflect pass2 recovery in recorded per-triangle result so downstream stats are consistent.
+                    r.state = TriangleTrimState.Clipped;
+                    r.keptAreaRatio = 0.5f;
+                    r.removedAreaRatio = 0.5f;
+                    r.cutEdges = 2;
+                    triangleResults[i] = r;
                 }
             }
         }
