@@ -1,9 +1,10 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using VRC.SDKBase;
 
 [AddComponentMenu("yoridrill/NDMF VRoid Mesh Trimmer")]
-public class NDMFVRoidMeshTrimmer : MonoBehaviour
+public class NDMFVRoidMeshTrimmer : MonoBehaviour, IEditorOnly
 {
     public enum TexturePostProcessMode
     {

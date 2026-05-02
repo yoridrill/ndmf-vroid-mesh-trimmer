@@ -349,6 +349,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         if (trimmer == null || state.queued || state.processing) return false;
         if (IsAnotherPreviewActiveInAvatar(trimmer)) return false;
         EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
+        state.failed = false;
         state.queued = true;
         state.processing = true;
         EditorUtility.SetDirty(trimmer);
@@ -414,6 +415,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
             trimmer.PreviewActiveSerialized = true;
             EditorUtility.SetDirty(trimmer);
+            state.failed = false;
         }
         finally
         {
