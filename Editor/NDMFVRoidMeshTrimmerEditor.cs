@@ -20,6 +20,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         public SkinnedMeshRenderer renderer;
         public Mesh originalSharedMesh;
         public Material[] originalSharedMaterials;
+        public bool originalEnabled;
         public bool originalForceRenderingOff;
         public GameObject previewObject;
         public SkinnedMeshRenderer previewRenderer;
@@ -485,6 +486,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             working.hideFlags = HideFlags.HideAndDontSave;
             r.previewRenderer.sharedMesh = working;
             r.previewRenderer.sharedMaterials = r.originalSharedMaterials;
+            r.renderer.enabled = false;
             r.renderer.forceRenderingOff = true;
         }
 
@@ -536,7 +538,8 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         var go = new GameObject(src.gameObject.name + " (NDMF Preview)");
         go.hideFlags = HideFlags.HideAndDontSave;
         go.transform.SetParent(src.transform.parent, false);
-        go.transform.SetPositionAndRotation(src.transform.position, src.transform.rotation);
+        go.transform.localPosition = src.transform.localPosition;
+        go.transform.localRotation = src.transform.localRotation;
         go.transform.localScale = src.transform.localScale;
 
         var dst = go.AddComponent<SkinnedMeshRenderer>();
@@ -573,6 +576,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
                     renderer = usage.renderer,
                     originalSharedMesh = usage.renderer.sharedMesh,
                     originalSharedMaterials = usage.renderer.sharedMaterials,
+                    originalEnabled = usage.renderer.enabled,
                     originalForceRenderingOff = usage.renderer.forceRenderingOff
                 };
                 state.rendererStates.Add(usage.renderer, r);
@@ -700,6 +704,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         {
             if (r.renderer != null)
             {
+                r.renderer.enabled = r.originalEnabled;
                 r.renderer.forceRenderingOff = r.originalForceRenderingOff;
             }
             if (r.previewMesh != null) UnityEngine.Object.DestroyImmediate(r.previewMesh);
