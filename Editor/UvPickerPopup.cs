@@ -55,7 +55,7 @@ public class UvPickerPopup : PopupWindowContent
         GUILayout.Space(2f);
         var statusStyle = new GUIStyle(EditorStyles.miniLabel) { clipping = TextClipping.Clip, wordWrap = false };
         string selectedText = _lastUv.HasValue
-            ? $"Selected: \"uv\": [{_lastUv.Value.x:F4}, {_lastUv.Value.y:F4}]"
+            ? $"Copied: \"uv\": [{_lastUv.Value.x:F4}, {_lastUv.Value.y:F4}]"
             : "Click image to copy UV";
         EditorGUILayout.LabelField(selectedText, statusStyle, GUILayout.Height(bottomAreaHeight));
 
