@@ -29,6 +29,9 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour, IEditorOnly
         public bool enableTextureFill = true;
         public TexturePostProcessMode texturePostProcessMode = TexturePostProcessMode.Solidify;
         public Color fillColor = Color.black;
+        public bool enablePreSubdivide = false;
+        [Range(0, 2)] public int preSubdivideLevel = 0;
+        public bool preSubdivideQuadAware = false;
         public List<RendererSubMeshRef> usages = new List<RendererSubMeshRef>();
     }
 

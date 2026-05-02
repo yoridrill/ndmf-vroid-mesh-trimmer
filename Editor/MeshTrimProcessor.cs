@@ -5,24 +5,26 @@ using UnityEngine.Rendering;
 
 public static class MeshTrimProcessor
 {
-    public enum VertexSourceKind
-    {
-        OriginalVertex,
-        EdgeLerp
-    }
-
     public struct VertexSource
     {
-        public VertexSourceKind kind;
-        public int indexA;
-        public int indexB;
-        public float t;
+        public int index0; public float weight0;
+        public int index1; public float weight1;
+        public int index2; public float weight2;
+        public int index3; public float weight3;
+
+        public static VertexSource Original(int originalIndex)
+        {
+            return new VertexSource { index0 = originalIndex, weight0 = 1f, index1 = -1, index2 = -1, index3 = -1 };
+        }
     }
 
     private class SubMeshTask
     {
         public AlphaMaskProcessor.AlphaMaskData maskData;
         public Texture2D texture;
+        public bool enablePreSubdivide;
+        public int preSubdivideLevel;
+        public bool preSubdivideQuadAware;
     }
 
     private struct TrimStats
@@ -57,6 +59,8 @@ public static class MeshTrimProcessor
 
         Dictionary<Texture2D, AlphaMaskProcessor.AlphaMaskData> maskCache = new Dictionary<Texture2D, AlphaMaskProcessor.AlphaMaskData>();
         Dictionary<SkinnedMeshRenderer, Dictionary<int, SubMeshTask>> tasksByRenderer = new Dictionary<SkinnedMeshRenderer, Dictionary<int, SubMeshTask>>();
+        int preSubdivideEnabledTargetCount = 0;
+        int quadAwareEnabledTargetCount = 0;
 
         foreach (var target in trimmer.targets)
         {
@@ -74,6 +78,9 @@ public static class MeshTrimProcessor
                 maskCache[target.mainTexture] = maskData;
             }
 
+            if (target.enablePreSubdivide) preSubdivideEnabledTargetCount++;
+            if (target.enablePreSubdivide && target.preSubdivideQuadAware) quadAwareEnabledTargetCount++;
+
             foreach (var usage in target.usages)
             {
                 if (usage == null || usage.renderer == null || !usage.renderer.gameObject.activeInHierarchy)
@@ -87,14 +94,21 @@ public static class MeshTrimProcessor
                     tasksByRenderer[usage.renderer] = subTasks;
                 }
 
-                subTasks[usage.subMeshIndex] = new SubMeshTask
+                if (!subTasks.TryGetValue(usage.subMeshIndex, out var existingTask))
                 {
-                    maskData = maskData,
-                    texture = target.mainTexture
-                };
+                    existingTask = new SubMeshTask();
+                    subTasks[usage.subMeshIndex] = existingTask;
+                }
+
+                existingTask.maskData = maskData;
+                existingTask.texture = target.mainTexture;
+                existingTask.enablePreSubdivide = existingTask.enablePreSubdivide || target.enablePreSubdivide;
+                existingTask.preSubdivideLevel = Mathf.Max(existingTask.preSubdivideLevel, target.preSubdivideLevel);
+                existingTask.preSubdivideQuadAware = existingTask.preSubdivideQuadAware || target.preSubdivideQuadAware;
             }
         }
 
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Trim task renderers={tasksByRenderer.Count}, PreSubdivideEnabledTargetCount={preSubdivideEnabledTargetCount}, QuadAwareEnabledTargetCount={quadAwareEnabledTargetCount}");
         foreach (var kv in tasksByRenderer)
         {
             ProcessRenderer(kv.Key, kv.Value, trimmer, preserveBlendShapes);
@@ -125,13 +139,7 @@ public static class MeshTrimProcessor
         var vertexSources = new List<VertexSource>(vertices.Count);
         for (int v = 0; v < vertices.Count; v++)
         {
-            vertexSources.Add(new VertexSource
-            {
-                kind = VertexSourceKind.OriginalVertex,
-                indexA = v,
-                indexB = -1,
-                t = 0f
-            });
+            vertexSources.Add(VertexSource.Original(v));
         }
 
         bool hasNormals = normals.Count == vertices.Count;
@@ -163,8 +171,29 @@ public static class MeshTrimProcessor
                 continue;
             }
 
+            int[] workingIndices = srcIndices;
+            int triBeforeSub = srcIndices.Length / 3;
+            int preAddedVertices = 0;
+            int quadCandidates = 0;
+            int acceptedQuads = 0;
+            int rejectedQuads = 0;
+            int triFallback = 0;
+            var swPre = System.Diagnostics.Stopwatch.StartNew();
+            if (task.enablePreSubdivide && task.preSubdivideLevel > 0)
+            {
+                if (task.preSubdivideQuadAware)
+                {
+                    workingIndices = PreSubdivideIndicesQuadAware(srcIndices, task.preSubdivideLevel, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref preAddedVertices, out quadCandidates, out acceptedQuads, out rejectedQuads, out triFallback);
+                }
+                else
+                {
+                    workingIndices = PreSubdivideIndices(srcIndices, task.preSubdivideLevel, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref preAddedVertices);
+                }
+            }
+            swPre.Stop();
+
             TrimStats stats = ProcessSubMesh(
-                srcIndices,
+                workingIndices,
                 task.maskData,
                 trimmer,
                 vertices,
@@ -189,13 +218,13 @@ public static class MeshTrimProcessor
             stats.addedVertices = vertices.Count - baseVertexCount;
             baseVertexCount = vertices.Count;
 
-            Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={renderer.name}, SubMesh={sub}, Texture={task.texture.name}, " +
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={renderer.name}, SubMesh={sub}, Texture={task.texture.name}, PreSubdivideEnabled={task.enablePreSubdivide}, PreSubdivideLevel={task.preSubdivideLevel}, QuadAware={task.preSubdivideQuadAware}, QuadCandidates={quadCandidates}, AcceptedQuads={acceptedQuads}, RejectedQuadCandidates={rejectedQuads}, TriangleFallbackCount={triFallback}, TrianglesBeforePreSubdivide={triBeforeSub}, TrianglesAfterPreSubdivide={workingIndices.Length / 3}, PreSubdivideAddedVertices={preAddedVertices}, PreSubdivideMs={swPre.ElapsedMilliseconds}, " +
                       $"OriginalTriangles={stats.originalTriangles}, OutputTriangles={stats.outputTriangles}, RemovedTriangles={stats.removedTriangles}, " +
                       $"AddedVertices={stats.addedVertices}, Intersections={stats.intersections}, " +
                       $"AllInsideButInteriorOutside={stats.allInsideButInteriorOutside}, AllOutsideButInteriorInside={stats.allOutsideButInteriorInside}, " +
                       $"CentroidOnlyInsidePreserved={stats.centroidOnlyInsidePreserved}, SingleEdgeMidpointInsideDiscarded={stats.singleEdgeMidpointInsideDiscarded}, " +
                       $"SingleEdgeMidpointAndCentroidInsidePreserved={stats.singleEdgeMidpointAndCentroidInsidePreserved}, TwoEdgeMidpointsInsideClipped={stats.twoEdgeMidpointsInsideClipped}, " +
-                      $"AllEdgeMidpointsInsidePreserved={stats.allEdgeMidpointsInsidePreserved}, FallbackPreserved={stats.fallbackPreserved}");
+                      $"AllEdgeMidpointsInsidePreserved={stats.allEdgeMidpointsInsidePreserved}, FallbackPreserved={stats.fallbackPreserved}, TrianglesAfterTrim={stats.outputTriangles}");
         }
 
         Mesh dst = new Mesh
@@ -228,6 +257,205 @@ public static class MeshTrimProcessor
         dst.RecalculateBounds();
         renderer.sharedMesh = dst;
         RestoreBlendShapeWeights(renderer, dst, savedBlendShapeNames, savedBlendShapeWeights);
+    }
+
+    private static int[] PreSubdivideIndices(
+        int[] srcIndices,
+        int level,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Vector2> uv,
+        List<Vector2> uv2,
+        List<Vector2> uv3,
+        List<Vector2> uv4,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasUv2,
+        bool hasUv3,
+        bool hasUv4,
+        bool hasColors,
+        bool hasBoneWeights,
+        List<VertexSource> vertexSources,
+        ref int addedVertices)
+    {
+        var indices = srcIndices;
+        for (int lv = 0; lv < level; lv++)
+        {
+            var cache = new Dictionary<long, int>();
+            var next = new List<int>(indices.Length * 4);
+            for (int i = 0; i < indices.Length; i += 3)
+            {
+                int i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+                int m01 = GetOrCreateMid(i0, i1, cache, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref addedVertices);
+                int m12 = GetOrCreateMid(i1, i2, cache, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref addedVertices);
+                int m20 = GetOrCreateMid(i2, i0, cache, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref addedVertices);
+                next.Add(i0); next.Add(m01); next.Add(m20);
+                next.Add(m01); next.Add(i1); next.Add(m12);
+                next.Add(m20); next.Add(m12); next.Add(i2);
+                next.Add(m01); next.Add(m12); next.Add(m20);
+            }
+            indices = next.ToArray();
+        }
+        return indices;
+    }
+
+    private static int GetOrCreateMid(int a, int b, Dictionary<long, int> cache,
+        List<Vector3> vertices, List<Vector3> normals, List<Vector4> tangents, List<Vector2> uv, List<Vector2> uv2, List<Vector2> uv3, List<Vector2> uv4,
+        List<Color> colors, List<BoneWeight> boneWeights, bool hasNormals, bool hasTangents, bool hasUv2, bool hasUv3, bool hasUv4, bool hasColors, bool hasBoneWeights,
+        List<VertexSource> vertexSources, ref int addedVertices)
+    {
+        int lo = Math.Min(a,b), hi=Math.Max(a,b); long key=((long)lo<<32)|(uint)hi;
+        if (cache.TryGetValue(key, out int idx)) return idx;
+        TrimStats dummy = default;
+        idx = AddInterpolatedVertex(a,b,0.5f,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources, ref dummy);
+        cache[key]=idx; addedVertices++; return idx;
+    }
+
+
+
+    private struct TriRef { public int t; public int edge; }
+
+    private static int[] PreSubdivideIndicesQuadAware(
+        int[] srcIndices, int level,
+        List<Vector3> vertices, List<Vector3> normals, List<Vector4> tangents, List<Vector2> uv, List<Vector2> uv2, List<Vector2> uv3, List<Vector2> uv4,
+        List<Color> colors, List<BoneWeight> boneWeights, bool hasNormals, bool hasTangents, bool hasUv2, bool hasUv3, bool hasUv4, bool hasColors, bool hasBoneWeights,
+        List<VertexSource> vertexSources, ref int addedVertices, out int quadCandidates, out int acceptedQuads, out int rejectedQuads, out int triFallback)
+    {
+        int[] indices = srcIndices;
+        quadCandidates = 0; acceptedQuads = 0; rejectedQuads = 0; triFallback = 0;
+        for (int lv = 0; lv < level; lv++)
+        {
+            var edgeMap = new Dictionary<long, List<TriRef>>();
+            int triCount = indices.Length / 3;
+            for (int t = 0; t < triCount; t++)
+            {
+                int i0 = indices[t*3], i1 = indices[t*3+1], i2 = indices[t*3+2];
+                AddTriEdge(edgeMap, i0, i1, t, 0);
+                AddTriEdge(edgeMap, i1, i2, t, 1);
+                AddTriEdge(edgeMap, i2, i0, t, 2);
+            }
+
+            var used = new bool[triCount];
+            var cache = new Dictionary<long,int>();
+            var next = new List<int>(indices.Length*4);
+            foreach (var kv in edgeMap)
+            {
+                if (kv.Value.Count != 2) continue;
+                quadCandidates++;
+                var a = kv.Value[0]; var b = kv.Value[1];
+                if (used[a.t] || used[b.t]) { rejectedQuads++; continue; }
+                int a0=indices[a.t*3],a1=indices[a.t*3+1],a2=indices[a.t*3+2];
+                int b0=indices[b.t*3],b1=indices[b.t*3+1],b2=indices[b.t*3+2];
+                int s0,s1; GetShared(a0,a1,a2,b0,b1,b2,out s0,out s1);
+                int oa=GetOther(a0,a1,a2,s0,s1), ob=GetOther(b0,b1,b2,s0,s1);
+                if (oa<0||ob<0) { rejectedQuads++; continue; }
+                if (!IsSafeQuadUv(uv[oa], uv[s0], uv[ob], uv[s1])) { rejectedQuads++; continue; }
+
+                int mA = GetOrCreateMid(oa,s0,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int mB = GetOrCreateMid(s0,ob,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int mC = GetOrCreateMid(ob,s1,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int mD = GetOrCreateMid(s1,oa,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int center = GetOrCreateMid(mA,mC,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+
+                AddQuadAsTris(next, oa,mA,center,mD);
+                AddQuadAsTris(next, mA,s0,mB,center);
+                AddQuadAsTris(next, center,mB,ob,mC);
+                AddQuadAsTris(next, mD,center,mC,s1);
+
+                used[a.t]=used[b.t]=true; acceptedQuads++;
+            }
+            for (int t=0;t<triCount;t++)
+            {
+                if (used[t]) continue;
+                triFallback++;
+                int i0=indices[t*3],i1=indices[t*3+1],i2=indices[t*3+2];
+                int m01=GetOrCreateMid(i0,i1,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int m12=GetOrCreateMid(i1,i2,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                int m20=GetOrCreateMid(i2,i0,cache,vertices,normals,tangents,uv,uv2,uv3,uv4,colors,boneWeights,hasNormals,hasTangents,hasUv2,hasUv3,hasUv4,hasColors,hasBoneWeights,vertexSources,ref addedVertices);
+                next.Add(i0); next.Add(m01); next.Add(m20);
+                next.Add(m01); next.Add(i1); next.Add(m12);
+                next.Add(m20); next.Add(m12); next.Add(i2);
+                next.Add(m01); next.Add(m12); next.Add(m20);
+            }
+            rejectedQuads = Math.Max(0, quadCandidates - acceptedQuads);
+            indices = next.ToArray();
+        }
+        return indices;
+    }
+
+
+    private static bool IsSafeQuadUv(Vector2 q00, Vector2 q10, Vector2 q11, Vector2 q01)
+    {
+        float area = Mathf.Abs(SignedArea(q00, q10, q11)) + Mathf.Abs(SignedArea(q00, q11, q01));
+        if (area < 1e-8f) return false;
+        if (SegmentsIntersect(q00, q10, q11, q01)) return false;
+        if (!IsConvexLike(q00, q10, q11, q01)) return false;
+        return true;
+    }
+
+    private static float SignedArea(Vector2 a, Vector2 b, Vector2 c)
+    {
+        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    }
+
+    private static bool IsConvexLike(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
+    {
+        float z1 = SignedArea(a, b, c);
+        float z2 = SignedArea(b, c, d);
+        float z3 = SignedArea(c, d, a);
+        float z4 = SignedArea(d, a, b);
+        int pos = (z1 > 0 ? 1 : 0) + (z2 > 0 ? 1 : 0) + (z3 > 0 ? 1 : 0) + (z4 > 0 ? 1 : 0);
+        int neg = (z1 < 0 ? 1 : 0) + (z2 < 0 ? 1 : 0) + (z3 < 0 ? 1 : 0) + (z4 < 0 ? 1 : 0);
+        return pos == 0 || neg == 0 || pos == 1 || neg == 1;
+    }
+
+    private static bool SegmentsIntersect(Vector2 p1, Vector2 p2, Vector2 q1, Vector2 q2)
+    {
+        float o1 = SignedArea(p1, p2, q1);
+        float o2 = SignedArea(p1, p2, q2);
+        float o3 = SignedArea(q1, q2, p1);
+        float o4 = SignedArea(q1, q2, p2);
+        return (o1 * o2 < 0f) && (o3 * o4 < 0f);
+    }
+
+    private static void AddTriEdge(Dictionary<long, List<TriRef>> map, int a, int b, int tri, int edge)
+    {
+        int lo=Math.Min(a,b),hi=Math.Max(a,b); long key=((long)lo<<32)|(uint)hi;
+        if(!map.TryGetValue(key,out var list)){list=new List<TriRef>(2); map[key]=list;}
+        list.Add(new TriRef{t=tri,edge=edge});
+    }
+    private static void GetShared(int a0,int a1,int a2,int b0,int b1,int b2,out int s0,out int s1){s0=-1;s1=-1;int[] a={a0,a1,a2};int[] b={b0,b1,b2};foreach(var x in a){if(x==b0||x==b1||x==b2){if(s0<0)s0=x; else{s1=x;return;}}}}
+    private static int GetOther(int a0,int a1,int a2,int s0,int s1){if(a0!=s0&&a0!=s1)return a0; if(a1!=s0&&a1!=s1)return a1; if(a2!=s0&&a2!=s1)return a2; return -1;}
+    private static void AddQuadAsTris(List<int> dst,int q00,int q10,int q11,int q01){dst.Add(q00);dst.Add(q10);dst.Add(q11); dst.Add(q00);dst.Add(q11);dst.Add(q01);}
+
+    private static int CountQuadCandidates(int[] srcIndices)
+    {
+        var edgeCount = new Dictionary<long, int>();
+        for (int i = 0; i < srcIndices.Length; i += 3)
+        {
+            AddEdge(edgeCount, srcIndices[i], srcIndices[i + 1]);
+            AddEdge(edgeCount, srcIndices[i + 1], srcIndices[i + 2]);
+            AddEdge(edgeCount, srcIndices[i + 2], srcIndices[i]);
+        }
+
+        int candidates = 0;
+        foreach (var kv in edgeCount)
+        {
+            if (kv.Value == 2) candidates++;
+        }
+
+        return candidates;
+    }
+
+    private static void AddEdge(Dictionary<long, int> map, int a, int b)
+    {
+        int lo = Math.Min(a, b), hi = Math.Max(a, b);
+        long key = ((long)lo << 32) | (uint)hi;
+        if (map.TryGetValue(key, out int c)) map[key] = c + 1;
+        else map[key] = 1;
     }
 
     private static TrimStats ProcessSubMesh(
@@ -634,13 +862,7 @@ public static class MeshTrimProcessor
         if (hasUv4) uv4.Add(MeshAttributeInterpolator.Lerp(uv4[a], uv4[b], t));
         if (hasColors) colors.Add(MeshAttributeInterpolator.Lerp(colors[a], colors[b], t));
         if (hasBoneWeights) boneWeights.Add(MeshAttributeInterpolator.Lerp(boneWeights[a], boneWeights[b], t));
-        vertexSources.Add(new VertexSource
-        {
-            kind = VertexSourceKind.EdgeLerp,
-            indexA = a,
-            indexB = b,
-            t = t
-        });
+        vertexSources.Add(LerpVertexSource(vertexSources[a], vertexSources[b], t));
         stats.intersections++;
         return newIndex;
     }
@@ -690,21 +912,9 @@ public static class MeshTrimProcessor
                 for (int i = 0; i < newVertexCount; i++)
                 {
                     VertexSource src = vertexSources[i];
-                    if (src.kind == VertexSourceKind.OriginalVertex)
-                    {
-                        newDeltaVertices[i] = oldDeltaVertices[src.indexA];
-                        newDeltaNormals[i] = oldDeltaNormals[src.indexA];
-                        newDeltaTangents[i] = oldDeltaTangents[src.indexA];
-                    }
-                    else
-                    {
-                        float t = src.t;
-                        int a = src.indexA;
-                        int b = src.indexB;
-                        newDeltaVertices[i] = Vector3.LerpUnclamped(oldDeltaVertices[a], oldDeltaVertices[b], t);
-                        newDeltaNormals[i] = Vector3.LerpUnclamped(oldDeltaNormals[a], oldDeltaNormals[b], t);
-                        newDeltaTangents[i] = Vector3.LerpUnclamped(oldDeltaTangents[a], oldDeltaTangents[b], t);
-                    }
+                    newDeltaVertices[i] = WeightedDelta(oldDeltaVertices, src);
+                    newDeltaNormals[i] = WeightedDelta(oldDeltaNormals, src);
+                    newDeltaTangents[i] = WeightedDelta(oldDeltaTangents, src);
                 }
 
                 newMesh.AddBlendShapeFrame(shapeName, weight, newDeltaVertices, newDeltaNormals, newDeltaTangents);
@@ -713,6 +923,76 @@ public static class MeshTrimProcessor
 
         sw.Stop();
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={rendererName}, Preserve BlendShapes={preserveBlendShapes}, BlendShapeCount={sourceMesh.blendShapeCount}, TotalFrameCount={totalFrames}, ProcessedDeltaVertexCount={newVertexCount}, ElapsedMs={sw.ElapsedMilliseconds}");
+    }
+
+
+    private static Vector3 WeightedDelta(Vector3[] deltas, VertexSource src)
+    {
+        Vector3 v = Vector3.zero;
+        if (src.index0 >= 0 && src.weight0 > 0f) v += deltas[src.index0] * src.weight0;
+        if (src.index1 >= 0 && src.weight1 > 0f) v += deltas[src.index1] * src.weight1;
+        if (src.index2 >= 0 && src.weight2 > 0f) v += deltas[src.index2] * src.weight2;
+        if (src.index3 >= 0 && src.weight3 > 0f) v += deltas[src.index3] * src.weight3;
+        return v;
+    }
+
+    private static VertexSource LerpVertexSource(VertexSource a, VertexSource b, float t)
+    {
+        float wa = 1f - t;
+        float wb = t;
+        int[] idx = { -1, -1, -1, -1 };
+        float[] w = { 0f, 0f, 0f, 0f };
+
+        AddWeighted(ref idx, ref w, a.index0, a.weight0 * wa);
+        AddWeighted(ref idx, ref w, a.index1, a.weight1 * wa);
+        AddWeighted(ref idx, ref w, a.index2, a.weight2 * wa);
+        AddWeighted(ref idx, ref w, a.index3, a.weight3 * wa);
+
+        AddWeighted(ref idx, ref w, b.index0, b.weight0 * wb);
+        AddWeighted(ref idx, ref w, b.index1, b.weight1 * wb);
+        AddWeighted(ref idx, ref w, b.index2, b.weight2 * wb);
+        AddWeighted(ref idx, ref w, b.index3, b.weight3 * wb);
+
+        KeepTop4(ref idx, ref w);
+        Normalize(ref w);
+
+        return new VertexSource { index0 = idx[0], weight0 = w[0], index1 = idx[1], weight1 = w[1], index2 = idx[2], weight2 = w[2], index3 = idx[3], weight3 = w[3] };
+    }
+
+    private static void AddWeighted(ref int[] idx, ref float[] w, int index, float weight)
+    {
+        if (index < 0 || weight <= 0f) return;
+        for (int i = 0; i < 4; i++)
+        {
+            if (idx[i] == index) { w[i] += weight; return; }
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            if (idx[i] < 0) { idx[i] = index; w[i] = weight; return; }
+        }
+        int min = 0;
+        for (int i = 1; i < 4; i++) if (w[i] < w[min]) min = i;
+        if (weight > w[min]) { idx[min] = index; w[min] = weight; }
+    }
+
+    private static void KeepTop4(ref int[] idx, ref float[] w)
+    {
+        for (int i = 0; i < 3; i++)
+        for (int j = i + 1; j < 4; j++)
+        {
+            if (w[j] > w[i])
+            {
+                float tw = w[i]; w[i] = w[j]; w[j] = tw;
+                int ti = idx[i]; idx[i] = idx[j]; idx[j] = ti;
+            }
+        }
+    }
+
+    private static void Normalize(ref float[] w)
+    {
+        float sum = w[0] + w[1] + w[2] + w[3];
+        if (sum <= 0f) return;
+        w[0] /= sum; w[1] /= sum; w[2] /= sum; w[3] /= sum;
     }
 
     private static float[] SaveBlendShapeWeights(SkinnedMeshRenderer renderer, Mesh sourceMesh)

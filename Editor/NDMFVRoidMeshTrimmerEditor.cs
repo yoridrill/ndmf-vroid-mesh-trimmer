@@ -276,7 +276,17 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             EditorGUILayout.BeginHorizontal();
 
             var previewRect = GUILayoutUtility.GetRect(previewSize, previewSize, GUILayout.Width(previewSize), GUILayout.Height(previewSize));
-            if (tex != null) EditorGUI.DrawPreviewTexture(previewRect, tex, null, ScaleMode.ScaleToFit);
+            if (tex != null)
+            {
+                bool hovered = previewRect.Contains(Event.current.mousePosition);
+                EditorGUI.DrawPreviewTexture(previewRect, tex, null, ScaleMode.ScaleToFit);
+                EditorGUIUtility.AddCursorRect(previewRect, MouseCursor.Link);
+                if (hovered && Event.current.type == EventType.MouseDown && Event.current.button == 0)
+                {
+                    PopupWindow.Show(previewRect, new UvPickerPopup(tex));
+                    Event.current.Use();
+                }
+            }
             else EditorGUI.HelpBox(previewRect, "No Tex", MessageType.None);
 
             EditorGUILayout.BeginVertical();
@@ -305,8 +315,9 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
                 mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUI.EnumPopup(controlsRect, mode);
             }
             EditorGUILayout.EndHorizontal();
+
             modeProp.enumValueIndex = (int)mode;
-            if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.TextureOnly);
+            if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.MeshAndTexture);
 
             EditorGUILayout.EndVertical();
             EditorGUILayout.EndHorizontal();
@@ -693,6 +704,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         }
 
         trimmer.targets.AddRange(grouped.Values);
+        AutoFillColorResolver.Apply(trimmer, trimmer.targets);
         EditorUtility.SetDirty(trimmer);
     }
 
