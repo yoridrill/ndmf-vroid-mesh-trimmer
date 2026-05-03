@@ -163,6 +163,11 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         {
             RestoreOriginalsFromRecovery(trimmer);
         }
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("4-Point Debug", EditorStyles.boldLabel);
+        DrawSetting("debugFourPointClipDetails");
+        DrawSetting("debugFourPointClipMaxTriangles");
+        DrawSetting("debugFourPointMaterialFilter");
         EditorGUI.indentLevel--;
     }
 
