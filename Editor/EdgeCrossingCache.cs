@@ -48,6 +48,7 @@ public class EdgeCrossingCache
     public int CreatedCount { get; private set; }
     public int HitCount { get; private set; }
     public int ReusedCount { get; private set; }
+    public IEnumerable<KeyValuePair<EdgeKey, List<EdgeCrossing>>> Entries => _cache;
 
     public List<EdgeCrossing> GetOrCreateEdgeCrossings(EdgeKey edgeKey)
     {
