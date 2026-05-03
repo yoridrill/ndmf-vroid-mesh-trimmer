@@ -2082,6 +2082,7 @@ public static class MeshTrimProcessor
 
         List<int> selectedTriangles = null;
         List<int> selectedOutsideTriangles = null;
+        List<int> selectedOutsideTrianglesAlt = null;
         string selectedStripCandidate = "none";
         if (s1Valid && (!s1ContainsMidA || !s1ContainsMidB)) { s1Valid = false; s1Reason = "rejectedByMidpointContainment"; stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount++; }
         if (s2Valid && (!s2ContainsMidA || !s2ContainsMidB)) { s2Valid = false; s2Reason = "rejectedByMidpointContainment"; stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount++; }
@@ -2089,8 +2090,20 @@ public static class MeshTrimProcessor
         {
             float s1Score = (s1ContainsMidA && s1ContainsMidB ? 1000f : 0f) + s1InsideRatio * 10f + s1AreaUv;
             float s2Score = (s2ContainsMidA && s2ContainsMidB ? 1000f : 0f) + s2InsideRatio * 10f + s2AreaUv;
-            if (!s2Valid || (s1Valid && s1Score >= s2Score)) { selectedTriangles = s1KeptTriangles; selectedOutsideTriangles = s1DiscardTriangles; selectedStripCandidate = "Strip1"; }
-            else { selectedTriangles = s2KeptTriangles; selectedOutsideTriangles = s2DiscardTriangles; selectedStripCandidate = "Strip2"; }
+            if (!s2Valid || (s1Valid && s1Score >= s2Score))
+            {
+                selectedTriangles = s1KeptTriangles;
+                selectedOutsideTriangles = s1DiscardTriangles;
+                selectedOutsideTrianglesAlt = s2DiscardTriangles;
+                selectedStripCandidate = "Strip1";
+            }
+            else
+            {
+                selectedTriangles = s2KeptTriangles;
+                selectedOutsideTriangles = s2DiscardTriangles;
+                selectedOutsideTrianglesAlt = s1DiscardTriangles;
+                selectedStripCandidate = "Strip2";
+            }
         }
 
         if (keepStripPreferred)
@@ -2105,6 +2118,11 @@ public static class MeshTrimProcessor
         if (discardStripPreferred)
         {
             stats.twoEdgeTwoCrossingsStripDiscardedCount++;
+            if ((selectedOutsideTrianglesAlt != null && selectedOutsideTrianglesAlt.Count > selectedOutsideTriangles.Count))
+            {
+                selectedOutsideTriangles = selectedOutsideTrianglesAlt;
+                selectedStripCandidate += "+altOutside";
+            }
             if (selectedOutsideTriangles != null && selectedOutsideTriangles.Count > 0)
             {
                 dstIndices.AddRange(selectedOutsideTriangles);
