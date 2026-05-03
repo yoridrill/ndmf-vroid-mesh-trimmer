@@ -118,6 +118,10 @@ public static class MeshTrimProcessor
         public int fourPointClipFallbackCount;
         public int fourPointClipGeneratedTriangles;
         public int fourPointClipGeneratedZeroFallbackCount;
+        public int fourPointGeneratedTriangleInsideCount;
+        public int fourPointGeneratedTriangleOutsideCount;
+        public int fourPointReversedSideSuspectedCount;
+        public int fourPointFallbackDueToInvalidSampleCount;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -1078,7 +1082,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Zero-boundary sampling summary: zero-boundary keep count={stats.zeroBoundaryKeepCount}, zero-boundary delete count={stats.zeroBoundaryDeleteCount}, centroid-only deleted count={stats.centroidOnlyDeletedCount}, zero-boundary mixed keep count={stats.zeroBoundaryMixedKeepCount}, zero-boundary mixed delete count={stats.zeroBoundaryMixedDeleteCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Two-boundary summary: two-boundary processed count={stats.twoBoundaryProcessedCount}, two-boundary kept region count={stats.twoBoundaryKeptRegionCount}, two-boundary generated triangles count={stats.twoBoundaryGeneratedTrianglesCount}, two-boundary fallback count={stats.twoBoundaryFallbackCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Four-plus-boundary fallback summary: four-plus-boundary fallback count={stats.fourPlusBoundaryFallbackCount}, four-plus-boundary keep count={stats.fourPlusBoundaryKeepCount}, four-plus-boundary delete count={stats.fourPlusBoundaryDeleteCount}");
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, four-point clip generated zero fallback count={stats.fourPointClipGeneratedZeroFallbackCount}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, four-point clip generated zero fallback count={stats.fourPointClipGeneratedZeroFallbackCount}, four-point generated triangle inside count={stats.fourPointGeneratedTriangleInsideCount}, four-point generated triangle outside count={stats.fourPointGeneratedTriangleOutsideCount}, four-point reversed-side suspected count={stats.fourPointReversedSideSuspectedCount}, four-point fallback due to invalid sample count={stats.fourPointFallbackDueToInvalidSampleCount}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
         return stats;
     }
 
@@ -1789,10 +1793,13 @@ public static class MeshTrimProcessor
             new[] { 1, 2, 3, 0 }  // fallback pairing
         };
 
-        int before = dstIndices.Count / 3;
         bool attempted = false;
         bool hasValidRegions = false;
         bool hasKeptRegion = false;
+        bool hasInvalidSampling = false;
+        int insideTriCount = 0;
+        int outsideTriCount = 0;
+        var acceptedTriangles = new List<int>();
 
         foreach (var pairing in pairings)
         {
@@ -1821,21 +1828,87 @@ public static class MeshTrimProcessor
             {
                 continue;
             }
-            if (keepA) TriangulateRegion(i0, i1, i2, rA, vertices, uv, trimmer, dstIndices, ref stats);
-            if (keepB) TriangulateRegion(i0, i1, i2, rB, vertices, uv, trimmer, dstIndices, ref stats);
-            if (keepMid) TriangulateRegion(i0, i1, i2, rMid, vertices, uv, trimmer, dstIndices, ref stats);
+            var generated = new List<int>();
+            if (keepA) TriangulateRegion(i0, i1, i2, rA, vertices, uv, trimmer, generated, ref stats);
+            if (keepB) TriangulateRegion(i0, i1, i2, rB, vertices, uv, trimmer, generated, ref stats);
+            if (keepMid) TriangulateRegion(i0, i1, i2, rMid, vertices, uv, trimmer, generated, ref stats);
+            acceptedTriangles.Clear();
+            insideTriCount = 0;
+            outsideTriCount = 0;
+            for (int t = 0; t + 2 < generated.Count; t += 3)
+            {
+                int a = generated[t];
+                int b = generated[t + 1];
+                int c = generated[t + 2];
+                if (!TrySampleTriangleInsideRatio(maskData, uv[a], uv[b], uv[c], out float ratio))
+                {
+                    hasInvalidSampling = true;
+                    continue;
+                }
+                if (ratio >= 0.5f)
+                {
+                    acceptedTriangles.Add(a);
+                    acceptedTriangles.Add(b);
+                    acceptedTriangles.Add(c);
+                    insideTriCount++;
+                }
+                else
+                {
+                    outsideTriCount++;
+                }
+            }
             break;
         }
 
         if (!attempted || !hasValidRegions || !hasKeptRegion) return false;
-        int generated = (dstIndices.Count / 3) - before;
-        if (generated <= 0)
+        if (hasInvalidSampling)
+        {
+            stats.fourPointFallbackDueToInvalidSampleCount++;
+            return false;
+        }
+        if (acceptedTriangles.Count == 0)
         {
             stats.fourPointClipGeneratedZeroFallbackCount++;
             return false;
         }
+        if (outsideTriCount > insideTriCount)
+        {
+            stats.fourPointReversedSideSuspectedCount++;
+        }
+        stats.fourPointGeneratedTriangleInsideCount += insideTriCount;
+        stats.fourPointGeneratedTriangleOutsideCount += outsideTriCount;
+        dstIndices.AddRange(acceptedTriangles);
+        int generated = acceptedTriangles.Count / 3;
         stats.fourPointClipSuccessCount++;
         stats.fourPointClipGeneratedTriangles += generated;
+        return true;
+    }
+
+    private static bool TrySampleTriangleInsideRatio(AlphaMaskProcessor.AlphaMaskData maskData, Vector2 uv0, Vector2 uv1, Vector2 uv2, out float insideRatio)
+    {
+        int samples = 0;
+        int inside = 0;
+        Vector2 centroid = (uv0 + uv1 + uv2) / 3f;
+        Vector2 m01 = (uv0 + uv1) * 0.5f;
+        Vector2 m12 = (uv1 + uv2) * 0.5f;
+        Vector2 m20 = (uv2 + uv0) * 0.5f;
+        Vector2[] points = { centroid, m01, m12, m20 };
+        for (int i = 0; i < points.Length; i++)
+        {
+            Vector2 p = points[i];
+            if (float.IsNaN(p.x) || float.IsNaN(p.y) || float.IsInfinity(p.x) || float.IsInfinity(p.y))
+            {
+                continue;
+            }
+            if (AlphaMaskProcessor.SampleMask(maskData, p)) inside++;
+            samples++;
+        }
+        if (samples <= 0)
+        {
+            insideRatio = 0f;
+            return false;
+        }
+        insideRatio = (float)inside / samples;
         return true;
     }
 
