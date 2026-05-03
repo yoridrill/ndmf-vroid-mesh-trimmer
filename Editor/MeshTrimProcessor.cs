@@ -81,6 +81,16 @@ public static class MeshTrimProcessor
         public int replacedClippedResultCount;
         public int keptSideDecidedByNeighborCount;
         public int keptSideDecidedByMaskCount;
+        public int edgeScanCrossings;
+        public int sameSignEdgeCrossings;
+        public int multiCrossingEdges;
+        public int bridgeCandidatesWith0Cut;
+        public int bridgeCandidatesWith1Cut;
+        public int bridgeCandidatesWith2Cut;
+        public int bridgeApplied;
+        public int bridgeRejectedNoTwoCuts;
+        public int bridgeRejectedDegenerate;
+        public int bridgeRejectedAmbiguousPairing;
     }
 
     private struct TrimStats
@@ -99,6 +109,9 @@ public static class MeshTrimProcessor
         public int allEdgeMidpointsInsidePreserved;
         public int fallbackPreserved;
     }
+
+    private const int BridgeEdgeSampleCount = 8;
+    private const int BridgeEdgeRefineIterations = 8;
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
     {
@@ -562,48 +575,11 @@ public static class MeshTrimProcessor
             int[] idx = { i0, i1, i2 };
             bool[] inside = { in0, in1, in2 };
 
-            if (insideCount == 1)
-            {
-                int insideV = -1, outA = -1, outB = -1;
-                for (int k = 0; k < 3; k++)
-                {
-                    if (inside[k]) insideV = idx[k];
-                    else if (outA < 0) outA = idx[k];
-                    else outB = idx[k];
-                }
-                int cutA = GetOrCreateIntersection(insideV, outA, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                int cutB = GetOrCreateIntersection(insideV, outB, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
-                AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
-            }
-            else if (insideCount == 2)
-            {
-                int outsideV = -1, inA = -1, inB = -1;
-                for (int k = 0; k < 3; k++)
-                {
-                    if (!inside[k]) outsideV = idx[k];
-                    else if (inA < 0) inA = idx[k];
-                    else inB = idx[k];
-                }
-                int cutA = GetOrCreateIntersection(inA, outsideV, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                int cutB = GetOrCreateIntersection(inB, outsideV, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
-                AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
-            }
+            GetOrCreateSampledEdgeIntersection(triIndex, idx[0], idx[1], inside[0], inside[1], maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, edgeCuts, ref stats, ref bridgeStats);
+            GetOrCreateSampledEdgeIntersection(triIndex, idx[1], idx[2], inside[1], inside[2], maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, edgeCuts, ref stats, ref bridgeStats);
+            GetOrCreateSampledEdgeIntersection(triIndex, idx[2], idx[0], inside[2], inside[0], maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, edgeCuts, ref stats, ref bridgeStats);
         }
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut prepass: Triangles={srcIndices.Length / 3}, EdgeCutsRecorded={edgeCuts.Count}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut prepass: Triangles={srcIndices.Length / 3}, EdgeCutsRecorded={edgeCuts.Count}, EdgeScanCrossings={bridgeStats.edgeScanCrossings}, SameSignEdgeCrossings={bridgeStats.sameSignEdgeCrossings}, MultiCrossingEdges={bridgeStats.multiCrossingEdges}");
 
         for (int i = 0; i < srcIndices.Length; i += 3)
         {
@@ -654,7 +630,7 @@ public static class MeshTrimProcessor
                     {
                         if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2)
                         {
-                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
+                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, ref bridgeStats, out var decidedByNeighbor))
                             {
                                 bridgeStats.bridgeCutAppliedCount++;
                                 bridgeStats.replacedClippedResultCount++;
@@ -695,7 +671,7 @@ public static class MeshTrimProcessor
                     {
                         if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2)
                         {
-                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
+                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, ref bridgeStats, out var decidedByNeighbor))
                             {
                                 bridgeStats.bridgeCutAppliedCount++;
                                 bridgeStats.replacedClippedResultCount++;
@@ -823,7 +799,7 @@ public static class MeshTrimProcessor
                 if (trimmer.enableBridgeCut &&
                     IsBridgeCandidate(clippedOneInside, trimmer) &&
                     CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
-                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
+                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, ref bridgeStats, out var decidedByNeighbor))
                 {
                     RecordBridgeApplied(ref bridgeStats, decidedByNeighbor);
                     triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
@@ -871,7 +847,7 @@ public static class MeshTrimProcessor
                 if (trimmer.enableBridgeCut &&
                     IsBridgeCandidate(clippedTwoInside, trimmer) &&
                     CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
-                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
+                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, ref bridgeStats, out var decidedByNeighbor))
                 {
                     RecordBridgeApplied(ref bridgeStats, decidedByNeighbor);
                     triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
@@ -912,7 +888,7 @@ public static class MeshTrimProcessor
                 pass2CandidateCount++;
 
                 pass2AttemptCount++;
-                if (TryBridgeCutAmbiguousTriangle(r.triangleIndex, ti0, ti1, ti2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
+                if (TryBridgeCutAmbiguousTriangle(r.triangleIndex, ti0, ti1, ti2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, ref bridgeStats, out var decidedByNeighbor))
                 {
                     RecordBridgeApplied(ref bridgeStats, decidedByNeighbor);
 
@@ -1044,7 +1020,7 @@ public static class MeshTrimProcessor
         {
             Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] BridgeCut pass1 result count mismatch. TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}");
         }
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}, BridgeCandidatesCount={bridgeStats.bridgeCandidatesCount}, AmbiguousBridgeCandidates={bridgeStats.ambiguousBridgeCandidates}, SmallKeptAreaBridgeCandidates={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemovedAreaBridgeCandidates={bridgeStats.smallRemovedAreaBridgeCandidates}, ContinuityIssueBridgeCandidates={bridgeStats.continuityIssueBridgeCandidates}, TrianglesWithTwoCutEdges={bridgeStats.trianglesWithTwoCutEdges}, BridgeCutAppliedCount={bridgeStats.bridgeCutAppliedCount}, Pass2AppliedCount={pass2AppliedTotal}, BridgeCutRejectedCount={bridgeStats.bridgeCutRejectedCount}, ReplacedClippedResultCount={bridgeStats.replacedClippedResultCount}, KeptSideDecidedByNeighborCount={bridgeStats.keptSideDecidedByNeighborCount}, KeptSideDecidedByMaskCount={bridgeStats.keptSideDecidedByMaskCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}, BridgeCandidatesCount={bridgeStats.bridgeCandidatesCount}, AmbiguousBridgeCandidates={bridgeStats.ambiguousBridgeCandidates}, SmallKeptAreaBridgeCandidates={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemovedAreaBridgeCandidates={bridgeStats.smallRemovedAreaBridgeCandidates}, ContinuityIssueBridgeCandidates={bridgeStats.continuityIssueBridgeCandidates}, TrianglesWithTwoCutEdges={bridgeStats.trianglesWithTwoCutEdges}, BridgeCutAppliedCount={bridgeStats.bridgeCutAppliedCount}, Pass2AppliedCount={pass2AppliedTotal}, BridgeCutRejectedCount={bridgeStats.bridgeCutRejectedCount}, ReplacedClippedResultCount={bridgeStats.replacedClippedResultCount}, KeptSideDecidedByNeighborCount={bridgeStats.keptSideDecidedByNeighborCount}, KeptSideDecidedByMaskCount={bridgeStats.keptSideDecidedByMaskCount}, EdgeScanCrossings={bridgeStats.edgeScanCrossings}, SameSignEdgeCrossings={bridgeStats.sameSignEdgeCrossings}, MultiCrossingEdges={bridgeStats.multiCrossingEdges}, BridgeCandidatesWith0Cut={bridgeStats.bridgeCandidatesWith0Cut}, BridgeCandidatesWith1Cut={bridgeStats.bridgeCandidatesWith1Cut}, BridgeCandidatesWith2Cut={bridgeStats.bridgeCandidatesWith2Cut}, BridgeApplied={bridgeStats.bridgeApplied}, BridgeRejectedNoTwoCuts={bridgeStats.bridgeRejectedNoTwoCuts}, BridgeRejectedDegenerate={bridgeStats.bridgeRejectedDegenerate}, BridgeRejectedAmbiguousPairing={bridgeStats.bridgeRejectedAmbiguousPairing}");
         return stats;
     }
 
@@ -1065,12 +1041,82 @@ public static class MeshTrimProcessor
                r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio;
     }
 
+    private static void GetOrCreateSampledEdgeIntersection(int triIndex, int a, int b, bool inA, bool inB,
+        AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices, List<Vector3> normals, List<Vector4> tangents,
+        List<Vector2> uv, List<Vector2> uv2, List<Vector2> uv3, List<Vector2> uv4,
+        List<Color> colors, List<BoneWeight> boneWeights, bool hasNormals, bool hasTangents,
+        bool hasUv2, bool hasUv3, bool hasUv4, bool hasColors, bool hasBoneWeights,
+        List<VertexSource> vertexSources, EdgeIntersectionCache cache, List<EdgeCutInfo> edgeCuts,
+        ref TrimStats stats, ref BridgeStats bridgeStats)
+    {
+        if (!FindEdgeMaskCrossings(maskData, uv[a], uv[b], inA, inB, out float t, out int crossingCount, out bool sameSignCrossing))
+        {
+            return;
+        }
+        bridgeStats.edgeScanCrossings++;
+        if (sameSignCrossing) bridgeStats.sameSignEdgeCrossings++;
+        if (crossingCount > 1) bridgeStats.multiCrossingEdges++;
+
+        int cut = (inA != inB)
+            ? GetOrCreateIntersection(a, b, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats)
+            : AddInterpolatedVertex(a, b, t, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+        AddEdgeCut(edgeCuts, triIndex, a, b, cut, uv);
+    }
+
+    private static bool FindEdgeMaskCrossings(AlphaMaskProcessor.AlphaMaskData maskData, Vector2 uvA, Vector2 uvB, bool startInside, bool endInside, out float t, out int crossingCount, out bool sameSignCrossing)
+    {
+        crossingCount = 0;
+        sameSignCrossing = false;
+        float firstCrossing = -1f;
+        bool prev = startInside;
+        float prevT = 0f;
+        for (int s = 1; s <= BridgeEdgeSampleCount; s++)
+        {
+            float sampleT = (float)s / BridgeEdgeSampleCount;
+            bool cur = AlphaMaskProcessor.SampleMask(maskData, Vector2.LerpUnclamped(uvA, uvB, sampleT));
+            if (cur != prev)
+            {
+                crossingCount++;
+                if (firstCrossing < 0f && TryFindEdgeMaskCrossing(maskData, uvA, uvB, prevT, sampleT, prev, out float refined))
+                {
+                    firstCrossing = refined;
+                }
+            }
+            prev = cur;
+            prevT = sampleT;
+        }
+
+        t = firstCrossing;
+        sameSignCrossing = startInside == endInside && crossingCount > 0;
+        return firstCrossing >= 0f;
+    }
+
+    private static bool TryFindEdgeMaskCrossing(AlphaMaskProcessor.AlphaMaskData maskData, Vector2 uvA, Vector2 uvB, float loT, float hiT, bool loInside, out float t)
+    {
+        t = -1f;
+        bool hiInside = AlphaMaskProcessor.SampleMask(maskData, Vector2.LerpUnclamped(uvA, uvB, hiT));
+        if (loInside == hiInside) return false;
+        float lo = loT;
+        float hi = hiT;
+        bool loState = loInside;
+        for (int i = 0; i < BridgeEdgeRefineIterations; i++)
+        {
+            float mid = (lo + hi) * 0.5f;
+            bool midInside = AlphaMaskProcessor.SampleMask(maskData, Vector2.LerpUnclamped(uvA, uvB, mid));
+            if (midInside == loState) lo = mid;
+            else hi = mid;
+        }
+        t = (lo + hi) * 0.5f;
+        return true;
+    }
+
 
 
 
 
     private static bool TryBridgeCutAmbiguousTriangle(int triIndex, int i0, int i1, int i2, List<EdgeCutInfo> edgeCuts, List<int> dstIndices,
-        List<Vector3> vertices, List<Vector2> uv, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer, ref TrimStats stats, out bool decidedByNeighbor)
+        List<Vector3> vertices, List<Vector2> uv, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer, ref TrimStats stats, ref BridgeStats bridgeStats, out bool decidedByNeighbor)
     {
         decidedByNeighbor = false;
         EdgeCutInfo c01 = default, c12 = default, c20 = default;
@@ -1084,21 +1130,24 @@ public static class MeshTrimProcessor
             else if (!h20 && c.edgeKey==e20){c20=c;h20=true;}
         }
         int hits=(h01?1:0)+(h12?1:0)+(h20?1:0);
-        if (hits<2) return false;
+        if (hits == 0) bridgeStats.bridgeCandidatesWith0Cut++;
+        else if (hits == 1) bridgeStats.bridgeCandidatesWith1Cut++;
+        else bridgeStats.bridgeCandidatesWith2Cut++;
+        if (hits<2) { bridgeStats.bridgeRejectedNoTwoCuts++; return false; }
 
         int cutA=-1, cutB=-1, shared=-1, other1=-1, other2=-1;
         EdgeCutInfo sideA = default, sideB = default;
         if (h01 && h20){cutA=c01.cutPointIndex;cutB=c20.cutPointIndex;sideA=c01;sideB=c20;shared=i0;other1=i1;other2=i2;}
         else if (h01 && h12){cutA=c01.cutPointIndex;cutB=c12.cutPointIndex;sideA=c01;sideB=c12;shared=i1;other1=i0;other2=i2;}
         else if (h12 && h20){cutA=c12.cutPointIndex;cutB=c20.cutPointIndex;sideA=c12;sideB=c20;shared=i2;other1=i1;other2=i0;}
-        else return false;
-        if (cutA == cutB) return false;
-        if (cutA<0||cutB<0||cutA>=uv.Count||cutB>=uv.Count) return false;
+        else { bridgeStats.bridgeRejectedAmbiguousPairing++; return false; }
+        if (cutA == cutB) { bridgeStats.bridgeRejectedAmbiguousPairing++; return false; }
+        if (cutA<0||cutB<0||cutA>=uv.Count||cutB>=uv.Count) { bridgeStats.bridgeRejectedAmbiguousPairing++; return false; }
 
         float triArea = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f;
-        if (triArea <= 0f) return false;
+        if (triArea <= 0f) { bridgeStats.bridgeRejectedDegenerate++; return false; }
         float cutArea = Mathf.Abs(SignedArea(uv[shared], uv[cutA], uv[cutB])) * 0.5f;
-        if (cutArea <= 0f) return false;
+        if (cutArea <= 0f) { bridgeStats.bridgeRejectedDegenerate++; return false; }
 
         bool keepSharedCorner;
         if (trimmer.bridgeUseNeighborKeptSide)
@@ -1131,12 +1180,13 @@ public static class MeshTrimProcessor
         {
             float a1 = Mathf.Abs(SignedArea(uv[other1], uv[other2], uv[cutA])) * 0.5f;
             float a2 = Mathf.Abs(SignedArea(uv[other2], uv[cutB], uv[cutA])) * 0.5f;
-            if (a1 <= 0f || a2 <= 0f) return false;
+            if (a1 <= 0f || a2 <= 0f) { bridgeStats.bridgeRejectedDegenerate++; return false; }
             AddEdgeCut(edgeCuts, triIndex, shared, other1, cutA, uv);
             AddEdgeCut(edgeCuts, triIndex, shared, other2, cutB, uv);
             AddTrianglePreserveWinding(dstIndices, i0, i1, i2, other1, other2, cutA, vertices, uv, trimmer, ref stats);
             AddTrianglePreserveWinding(dstIndices, i0, i1, i2, other2, cutB, cutA, vertices, uv, trimmer, ref stats);
         }
+        bridgeStats.bridgeApplied++;
         return true;
     }
 
