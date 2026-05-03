@@ -963,9 +963,30 @@ public static class MeshTrimProcessor
         for (int i = 0; i < triangleResults.Count; i++)
         {
             var r = triangleResults[i];
+            int triBase = r.triangleIndex * 3;
+            if (triBase >= 0 && triBase + 2 < srcIndices.Length)
+            {
+                int ti0 = srcIndices[triBase];
+                int ti1 = srcIndices[triBase + 1];
+                int ti2 = srcIndices[triBase + 2];
+                Vector2 triCentroid = (uv[ti0] + uv[ti1] + uv[ti2]) / 3f;
+                r.keptRegionCentroidUv = triCentroid;
+                r.removedRegionCentroidUv = triCentroid;
+            }
             if (cutPointsByTri.TryGetValue(r.triangleIndex, out var cps))
             {
                 r.cutPoints = cps.ToArray();
+                if (cps.Count >= 2 && triBase >= 0 && triBase + 2 < srcIndices.Length)
+                {
+                    int ti0 = srcIndices[triBase];
+                    int ti1 = srcIndices[triBase + 1];
+                    int ti2 = srcIndices[triBase + 2];
+                    Vector2 cp0 = uv[cps[0]];
+                    Vector2 cp1 = uv[cps[1]];
+                    // Approximate split centroids for bridge scoring metadata.
+                    r.keptRegionCentroidUv = (uv[ti0] + cp0 + cp1) / 3f;
+                    r.removedRegionCentroidUv = (uv[ti1] + uv[ti2] + cp0 + cp1) * 0.25f;
+                }
             }
             if (r.state == TriangleTrimState.StrongTrim) r.generatedTriangles = 0;
             else if (r.state == TriangleTrimState.StrongKeep) r.generatedTriangles = 1;
