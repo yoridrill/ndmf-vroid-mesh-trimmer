@@ -63,6 +63,9 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour, IEditorOnly
 
     [Min(0f)] public float minTriangleUvArea = 0.0000001f;
     [Min(0f)] public float minTriangleWorldArea = 0.0000001f;
+    [SerializeField] public bool debugFourPointClipDetails = false;
+    [SerializeField] public int debugFourPointClipMaxTriangles = 20;
+    [SerializeField] public string debugFourPointMaterialFilter = "";
 
     [SerializeField] private bool previewActiveSerialized;
     [SerializeField] private List<PreviewRecoveryRecord> previewRecoveryRecords = new List<PreviewRecoveryRecord>();
