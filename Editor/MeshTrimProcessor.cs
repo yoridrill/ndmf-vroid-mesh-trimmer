@@ -2070,8 +2070,8 @@ public static class MeshTrimProcessor
 
         var strip1 = new List<int> { a0.vertexIndex, a1.vertexIndex, b1.vertexIndex, b0.vertexIndex };
         var strip2 = new List<int> { a0.vertexIndex, a1.vertexIndex, b0.vertexIndex, b1.vertexIndex };
-        EvaluateStripCandidate(strip1, i0, i1, i2, vertices, uv, trimmer, maskData, aMid, bMid, out bool s1Valid, out string s1Reason, out float s1AreaUv, out float s1AreaWorld, out bool s1Intersect, out bool s1ContainsMidA, out bool s1ContainsMidB, out float s1InsideRatio, out List<int> s1Triangles);
-        EvaluateStripCandidate(strip2, i0, i1, i2, vertices, uv, trimmer, maskData, aMid, bMid, out bool s2Valid, out string s2Reason, out float s2AreaUv, out float s2AreaWorld, out bool s2Intersect, out bool s2ContainsMidA, out bool s2ContainsMidB, out float s2InsideRatio, out List<int> s2Triangles);
+        EvaluateStripCandidate(strip1, i0, i1, i2, vertices, uv, trimmer, maskData, aMid, bMid, out bool s1Valid, out string s1Reason, out float s1AreaUv, out float s1AreaWorld, out bool s1Intersect, out bool s1ContainsMidA, out bool s1ContainsMidB, out float s1InsideRatio, out List<int> s1KeptTriangles, out List<int> s1DiscardTriangles);
+        EvaluateStripCandidate(strip2, i0, i1, i2, vertices, uv, trimmer, maskData, aMid, bMid, out bool s2Valid, out string s2Reason, out float s2AreaUv, out float s2AreaWorld, out bool s2Intersect, out bool s2ContainsMidA, out bool s2ContainsMidB, out float s2InsideRatio, out List<int> s2KeptTriangles, out List<int> s2DiscardTriangles);
         bool keepStripPreferred = aIn && bIn;
         bool discardStripPreferred = !aIn && !bIn;
         if (aIn != bIn)
@@ -2080,13 +2080,16 @@ public static class MeshTrimProcessor
         }
 
         List<int> selectedTriangles = null;
+        List<int> selectedOutsideTriangles = null;
         string selectedStripCandidate = "none";
         if (s1Valid && (!s1ContainsMidA || !s1ContainsMidB)) { s1Valid = false; s1Reason = "rejectedByMidpointContainment"; stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount++; }
         if (s2Valid && (!s2ContainsMidA || !s2ContainsMidB)) { s2Valid = false; s2Reason = "rejectedByMidpointContainment"; stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount++; }
         if (s1Valid || s2Valid)
         {
-            if (!s2Valid || (s1Valid && s1AreaUv >= s2AreaUv)) { selectedTriangles = s1Triangles; selectedStripCandidate = "Strip1"; }
-            else { selectedTriangles = s2Triangles; selectedStripCandidate = "Strip2"; }
+            float s1Score = (s1ContainsMidA && s1ContainsMidB ? 1000f : 0f) + s1InsideRatio * 10f + s1AreaUv;
+            float s2Score = (s2ContainsMidA && s2ContainsMidB ? 1000f : 0f) + s2InsideRatio * 10f + s2AreaUv;
+            if (!s2Valid || (s1Valid && s1Score >= s2Score)) { selectedTriangles = s1KeptTriangles; selectedOutsideTriangles = s1DiscardTriangles; selectedStripCandidate = "Strip1"; }
+            else { selectedTriangles = s2KeptTriangles; selectedOutsideTriangles = s2DiscardTriangles; selectedStripCandidate = "Strip2"; }
         }
 
         if (keepStripPreferred)
@@ -2101,6 +2104,11 @@ public static class MeshTrimProcessor
         if (discardStripPreferred)
         {
             stats.twoEdgeTwoCrossingsStripDiscardedCount++;
+            if (selectedOutsideTriangles != null && selectedOutsideTriangles.Count > 0)
+            {
+                dstIndices.AddRange(selectedOutsideTriangles);
+                return true;
+            }
             TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 80f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, mismatch={aIn!=bIn}, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), midA={aMid}, midAInside={aIn}, midB={bMid}, midBInside={bIn}, Strip1 valid={s1Valid}, reason={s1Reason}, containsMidA={s1ContainsMidA}, containsMidB={s1ContainsMidB}, Strip2 valid={s2Valid}, reason={s2Reason}, containsMidA={s2ContainsMidA}, containsMidB={s2ContainsMidB}, selectedStrip={selectedStripCandidate}, fallbackReason=strip outside");
             return false;
         }
@@ -2110,9 +2118,10 @@ public static class MeshTrimProcessor
         return false;
     }
 
-    private static void EvaluateStripCandidate(List<int> poly, int i0, int i1, int i2, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, AlphaMaskProcessor.AlphaMaskData maskData, Vector2 midA, Vector2 midB, out bool valid, out string reason, out float areaUv, out float areaWorld, out bool selfIntersect, out bool containsMidA, out bool containsMidB, out float insideRatio, out List<int> keptTriangles)
+    private static void EvaluateStripCandidate(List<int> poly, int i0, int i1, int i2, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, AlphaMaskProcessor.AlphaMaskData maskData, Vector2 midA, Vector2 midB, out bool valid, out string reason, out float areaUv, out float areaWorld, out bool selfIntersect, out bool containsMidA, out bool containsMidB, out float insideRatio, out List<int> keptTriangles, out List<int> discardTriangles)
     {
         keptTriangles = new List<int>();
+        discardTriangles = new List<int>();
         reason = "valid";
         areaUv = Mathf.Abs(SignedArea(uv[poly[0]], uv[poly[1]], uv[poly[2]])) * 0.5f + Mathf.Abs(SignedArea(uv[poly[0]], uv[poly[2]], uv[poly[3]])) * 0.5f;
         selfIntersect = SegmentsIntersect(uv[poly[0]], uv[poly[1]], uv[poly[2]], uv[poly[3]]) || SegmentsIntersect(uv[poly[1]], uv[poly[2]], uv[poly[3]], uv[poly[0]]);
@@ -2137,6 +2146,10 @@ public static class MeshTrimProcessor
                 if (r >= 0.5f)
                 {
                     keptTriangles.Add(generated[t]); keptTriangles.Add(generated[t + 1]); keptTriangles.Add(generated[t + 2]);
+                }
+                else
+                {
+                    discardTriangles.Add(generated[t]); discardTriangles.Add(generated[t + 1]); discardTriangles.Add(generated[t + 2]);
                 }
             }
         }
