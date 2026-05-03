@@ -743,67 +743,7 @@ public static class MeshTrimProcessor
 
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
 
-            bool attemptedTwoLine = false;
-            bool twoLineSucceeded = false;
-            bool fellBackToLegacySingleCut = false;
-            bool legacySingleCutSucceeded = false;
-            if (boundaryPointsDetected == 4)
-            {
-                attemptedTwoLine = true;
-                if (TryProcessFourBoundaryTriangle(i0, i1, i2, triIndex, boundaryPoints, maskData, trimmer, vertices, uv, dstIndices, ref stats, debugCandidates, rendererName, subMeshIndex, materialName, textureName))
-                {
-                    twoLineSucceeded = true;
-                    if (trimmer.debugFourPointClipDetails) Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] triangleIndex={triIndex}, attemptedTwoLine={attemptedTwoLine}, twoLineSucceeded={twoLineSucceeded}, fellBackToLegacySingleCut={fellBackToLegacySingleCut}, legacySingleCutSucceeded={legacySingleCutSucceeded}, finalPath=twoLine");
-                    stats.finalPathTwoLineCount++;
-                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
-                    continue;
-                }
-                fellBackToLegacySingleCut = true;
-                stats.fallbackToLegacySingleCutCount++;
-                stats.legacySingleCutAttemptCount++;
-                if (TryProcessLegacySingleCutFromFourBoundary(i0, i1, i2, boundaryPoints, insideCount, maskData, trimmer, vertices, uv, dstIndices, ref stats))
-                {
-                    legacySingleCutSucceeded = true;
-                    stats.legacySingleCutSucceededAfterTwoLineFailureCount++;
-                    if (trimmer.debugFourPointClipDetails) Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] triangleIndex={triIndex}, attemptedTwoLine={attemptedTwoLine}, twoLineSucceeded={twoLineSucceeded}, fellBackToLegacySingleCut={fellBackToLegacySingleCut}, legacySingleCutSucceeded={legacySingleCutSucceeded}, finalPath=legacySingleCut");
-                    stats.finalPathLegacySingleCutCount++;
-                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 1));
-                    continue;
-                }
-                stats.legacySingleCutFailedCount++;
-            }
-
-            if (boundaryPointsDetected >= 4)
-            {
-                stats.fourPlusBoundaryFallbackCount++;
-                stats.fourPointClipFallbackCount++;
-                stats.fallbackToOldKeepDeleteCount++;
-                if (boundaryPointsDetected == 4) stats.finalPathOldFallbackCount++;
-                if (boundaryPointsDetected == 4 && trimmer.debugFourPointClipDetails) Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] triangleIndex={triIndex}, attemptedTwoLine={attemptedTwoLine}, twoLineSucceeded={twoLineSucceeded}, fellBackToLegacySingleCut={fellBackToLegacySingleCut}, legacySingleCutSucceeded={legacySingleCutSucceeded}, finalPath=oldFallback");
-                const int sampleCount = 13;
-                int expandedInsideCount = CountExpandedInsideSamples(maskData, uv[i0], uv[i1], uv[i2], in0, in1, in2, centroidIn);
-                bool keepFourPlusBoundaryFallback = expandedInsideCount >= (sampleCount * 0.5f);
-
-                if (keepFourPlusBoundaryFallback)
-                {
-                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                    stats.fourPlusBoundaryKeepCount++;
-                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 0));
-                }
-                else
-                {
-                    stats.removedTriangles++;
-                    stats.fourPlusBoundaryDeleteCount++;
-                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 0f, 0));
-                }
-                continue;
-            }
-
-            if (boundaryPointsDetected == 2 && TryProcessTwoBoundaryTriangle(i0, i1, i2, boundaryPoints, insideCount, maskData, trimmer, vertices, uv, dstIndices, ref stats))
-            {
-                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 1));
-                continue;
-            }
+            // BoundaryPoint-based output branches are intentionally disabled in this stage.
 
             if (insideCount == 3)
             {
@@ -819,59 +759,7 @@ public static class MeshTrimProcessor
 
             if (insideCount == 0)
             {
-                if (boundaryPointsDetected == 0)
-                {
-                    bool s01025In = AlphaMaskProcessor.SampleMask(maskData, s01025);
-                    bool s01050In = AlphaMaskProcessor.SampleMask(maskData, s01050);
-                    bool s01075In = AlphaMaskProcessor.SampleMask(maskData, s01075);
-                    bool s12025In = AlphaMaskProcessor.SampleMask(maskData, s12025);
-                    bool s12050In = AlphaMaskProcessor.SampleMask(maskData, s12050);
-                    bool s12075In = AlphaMaskProcessor.SampleMask(maskData, s12075);
-                    bool s20025In = AlphaMaskProcessor.SampleMask(maskData, s20025);
-                    bool s20050In = AlphaMaskProcessor.SampleMask(maskData, s20050);
-                    bool s20075In = AlphaMaskProcessor.SampleMask(maskData, s20075);
-
-                    int sampleCount = 13;
-                    int expandedInsideCount =
-                        (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0) +
-                        (s01025In ? 1 : 0) + (s01050In ? 1 : 0) + (s01075In ? 1 : 0) +
-                        (s12025In ? 1 : 0) + (s12050In ? 1 : 0) + (s12075In ? 1 : 0) +
-                        (s20025In ? 1 : 0) + (s20050In ? 1 : 0) + (s20075In ? 1 : 0) +
-                        (centroidIn ? 1 : 0);
-
-                    bool keepZeroBoundary;
-                    if (expandedInsideCount == 0) keepZeroBoundary = false;
-                    else if (expandedInsideCount == sampleCount) keepZeroBoundary = true;
-                    else if (expandedInsideCount <= 1) keepZeroBoundary = false;
-                    else if (expandedInsideCount >= sampleCount - 1) keepZeroBoundary = true;
-                    else keepZeroBoundary = ((float)expandedInsideCount / sampleCount) >= 0.5f;
-
-                    if (keepZeroBoundary)
-                    {
-                        AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                        stats.zeroBoundaryKeepCount++;
-                        if (expandedInsideCount > 1 && expandedInsideCount < sampleCount - 1)
-                        {
-                            stats.zeroBoundaryMixedKeepCount++;
-                        }
-                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 0));
-                    }
-                    else
-                    {
-                        stats.removedTriangles++;
-                        stats.zeroBoundaryDeleteCount++;
-                        if (expandedInsideCount == 1 && centroidIn)
-                        {
-                            stats.centroidOnlyDeletedCount++;
-                        }
-                        if (expandedInsideCount > 1 && expandedInsideCount < sampleCount - 1)
-                        {
-                            stats.zeroBoundaryMixedDeleteCount++;
-                        }
-                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
-                    }
-                    continue;
-                }
+                // zero-boundary expanded sampling branch intentionally disabled in this stage.
 
                 int edgeInsideCount = (m01In ? 1 : 0) + (m12In ? 1 : 0) + (m20In ? 1 : 0);
                 if (m01In || m12In || m20In || centroidIn)
