@@ -2034,6 +2034,10 @@ public static class MeshTrimProcessor
             for (int j = i + 1; j < boundaryPoints.Count; j++)
             {
                 if (boundaryPoints[i].edgeIndex == boundaryPoints[j].edgeIndex) continue;
+                if (trimmer != null && trimmer.debugFourPointClipDetails)
+                {
+                    Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] legacySingleCut selected pair: edgeA={pairCandidates[k].a.edgeIndex}, edgeB={pairCandidates[k].b.edgeIndex}, uvA={pairCandidates[k].a.uv}, uvB={pairCandidates[k].b.uv}, score={pairCandidates[k].score:F6}");
+                }
                 var candidate = new List<BoundaryPoint> { boundaryPoints[i], boundaryPoints[j] };
                 if (TryProcessTwoBoundaryTriangle(i0, i1, i2, candidate, insideCount, maskData, trimmer, vertices, uv, dstIndices, ref stats))
                 {
