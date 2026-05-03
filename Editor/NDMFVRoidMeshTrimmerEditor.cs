@@ -83,12 +83,6 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         DrawSetting("maskClosePixels");
         DrawSetting("fillSmallHolesPixels");
         DrawSetting("removeSmallIslandsPixels");
-        EditorGUILayout.Space();
-        EditorGUILayout.LabelField("Bridge Cut", EditorStyles.boldLabel);
-        DrawSetting("enableBridgeCut");
-        DrawSetting("bridgeSmallKeptAreaRatio");
-        DrawSetting("bridgeSmallRemovedAreaRatio");
-        DrawSetting("bridgeUseNeighborKeptSide");
         bool oldPadding = trimmer.enableTexturePadding;
         EditorGUILayout.PropertyField(serializedObject.FindProperty("enableTexturePadding"), new GUIContent(T("テクスチャの余白を塗り足す", "Pad Texture Transparent Areas")));
 
@@ -262,10 +256,6 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             case "maskClosePixels": return T("細い隙間を無視 (px)", "Ignore Thin Gaps (px)");
             case "fillSmallHolesPixels": return T("透明穴下限サイズ (px)", "Min Transparent Hole Size (px)");
             case "removeSmallIslandsPixels": return T("ゴミ判定サイズ (px)", "Noise Threshold Size (px)");
-            case "enableBridgeCut": return T("Bridge Cutを有効化", "Enable Bridge Cut");
-            case "bridgeSmallKeptAreaRatio": return T("Bridge: 小さい残存面積比", "Bridge: Small Kept Area Ratio");
-            case "bridgeSmallRemovedAreaRatio": return T("Bridge: 小さい削除面積比", "Bridge: Small Removed Area Ratio");
-            case "bridgeUseNeighborKeptSide": return T("Bridge: 隣接keep側を優先", "Bridge: Prefer Neighbor Kept Side");
             case "minIntersectionT": return T("最小交点t", "Min Intersection t");
             case "maxIntersectionT": return T("最大交点t", "Max Intersection t");
             case "minTriangleUvArea": return T("最小UV三角形面積", "Min Triangle UV Area");
