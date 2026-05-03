@@ -37,7 +37,7 @@ public static class MeshAttributeInterpolator
         float sum = top[0].Value + top[1].Value + top[2].Value + top[3].Value;
         if (sum <= 0f)
         {
-            return a;
+            return new BoneWeight { boneIndex0 = 0, boneIndex1 = 0, boneIndex2 = 0, boneIndex3 = 0, weight0 = 1f, weight1 = 0f, weight2 = 0f, weight3 = 0f };
         }
 
         BoneWeight result = new BoneWeight
@@ -57,7 +57,7 @@ public static class MeshAttributeInterpolator
 
     private static void AddWeight(Dictionary<int, float> map, int boneIndex, float weight)
     {
-        if (weight <= 0f)
+        if (boneIndex < 0 || weight <= 0f)
         {
             return;
         }
