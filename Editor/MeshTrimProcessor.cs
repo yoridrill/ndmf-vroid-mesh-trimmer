@@ -117,6 +117,7 @@ public static class MeshTrimProcessor
         public int fourPointClipSuccessCount;
         public int fourPointClipFallbackCount;
         public int fourPointClipGeneratedTriangles;
+        public int fourPointClipGeneratedZeroFallbackCount;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -1077,7 +1078,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Zero-boundary sampling summary: zero-boundary keep count={stats.zeroBoundaryKeepCount}, zero-boundary delete count={stats.zeroBoundaryDeleteCount}, centroid-only deleted count={stats.centroidOnlyDeletedCount}, zero-boundary mixed keep count={stats.zeroBoundaryMixedKeepCount}, zero-boundary mixed delete count={stats.zeroBoundaryMixedDeleteCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Two-boundary summary: two-boundary processed count={stats.twoBoundaryProcessedCount}, two-boundary kept region count={stats.twoBoundaryKeptRegionCount}, two-boundary generated triangles count={stats.twoBoundaryGeneratedTrianglesCount}, two-boundary fallback count={stats.twoBoundaryFallbackCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Four-plus-boundary fallback summary: four-plus-boundary fallback count={stats.fourPlusBoundaryFallbackCount}, four-plus-boundary keep count={stats.fourPlusBoundaryKeepCount}, four-plus-boundary delete count={stats.fourPlusBoundaryDeleteCount}");
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, four-point clip generated zero fallback count={stats.fourPointClipGeneratedZeroFallbackCount}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
         return stats;
     }
 
@@ -1790,6 +1791,8 @@ public static class MeshTrimProcessor
 
         int before = dstIndices.Count / 3;
         bool attempted = false;
+        bool hasValidRegions = false;
+        bool hasKeptRegion = false;
 
         foreach (var pairing in pairings)
         {
@@ -1805,18 +1808,32 @@ public static class MeshTrimProcessor
 
             attempted = true;
             BuildFourBoundaryRegions(i0, i1, i2, p0, p1, p2, p3, out var rA, out var rB, out var rMid);
+            if (rA.Count < 3 || rB.Count < 3 || rMid.Count < 3)
+            {
+                continue;
+            }
+            hasValidRegions = true;
             bool keepA = EstimateKeep(maskData, rA, uv);
             bool keepB = EstimateKeep(maskData, rB, uv);
             bool keepMid = EstimateKeep(maskData, rMid, uv);
+            hasKeptRegion = keepA || keepB || keepMid;
+            if (!hasKeptRegion)
+            {
+                continue;
+            }
             if (keepA) TriangulateRegion(i0, i1, i2, rA, vertices, uv, trimmer, dstIndices, ref stats);
             if (keepB) TriangulateRegion(i0, i1, i2, rB, vertices, uv, trimmer, dstIndices, ref stats);
             if (keepMid) TriangulateRegion(i0, i1, i2, rMid, vertices, uv, trimmer, dstIndices, ref stats);
             break;
         }
 
-        if (!attempted) return false;
+        if (!attempted || !hasValidRegions || !hasKeptRegion) return false;
         int generated = (dstIndices.Count / 3) - before;
-        if (generated <= 0) return false;
+        if (generated <= 0)
+        {
+            stats.fourPointClipGeneratedZeroFallbackCount++;
+            return false;
+        }
         stats.fourPointClipSuccessCount++;
         stats.fourPointClipGeneratedTriangles += generated;
         return true;
