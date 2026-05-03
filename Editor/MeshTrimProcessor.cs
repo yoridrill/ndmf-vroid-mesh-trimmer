@@ -1843,19 +1843,6 @@ public static class MeshTrimProcessor
         return inside >= ((region.Count + 1) * 0.5f);
     }
 
-    private static bool SegmentsIntersect(Vector2 a1, Vector2 a2, Vector2 b1, Vector2 b2)
-    {
-        float o1 = Orient(a1, a2, b1);
-        float o2 = Orient(a1, a2, b2);
-        float o3 = Orient(b1, b2, a1);
-        float o4 = Orient(b1, b2, a2);
-        return (o1 * o2 < 0f) && (o3 * o4 < 0f);
-    }
-
-    private static float Orient(Vector2 a, Vector2 b, Vector2 c)
-    {
-        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    }
 
     private static Vector2 AverageUv(List<int> polygon, List<Vector2> uv)
     {
