@@ -132,6 +132,7 @@ public static class MeshTrimProcessor
         public int fourPointPairingBSelectedCount;
         public int fourPointPairingCSelectedCount;
         public int fourPointPairingRejectedByIntersectionCount;
+        public int fourPointPairingRejectedBySameEdgeLineCount;
         public int fourPointPairingRejectedByDegenerateCount;
         public int fourPointPairingFallbackCount;
         public float fourPointBestScore;
@@ -1120,7 +1121,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Two-boundary summary: two-boundary processed count={stats.twoBoundaryProcessedCount}, two-boundary kept region count={stats.twoBoundaryKeptRegionCount}, two-boundary generated triangles count={stats.twoBoundaryGeneratedTrianglesCount}, two-boundary fallback count={stats.twoBoundaryFallbackCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Four-plus-boundary fallback summary: four-plus-boundary fallback count={stats.fourPlusBoundaryFallbackCount}, four-plus-boundary keep count={stats.fourPlusBoundaryKeepCount}, four-plus-boundary delete count={stats.fourPlusBoundaryDeleteCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, four-point clip generated zero fallback count={stats.fourPointClipGeneratedZeroFallbackCount}, four-point generated triangle inside count={stats.fourPointGeneratedTriangleInsideCount}, four-point generated triangle outside count={stats.fourPointGeneratedTriangleOutsideCount}, four-point reversed-side suspected count={stats.fourPointReversedSideSuspectedCount}, four-point fallback due to invalid sample count={stats.fourPointFallbackDueToInvalidSampleCount}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point pairing summary: four-point pairing candidates tested count={stats.fourPointPairingCandidatesTestedCount}, four-point pairing A selected count={stats.fourPointPairingASelectedCount}, four-point pairing B selected count={stats.fourPointPairingBSelectedCount}, four-point pairing C selected count={stats.fourPointPairingCSelectedCount}, four-point pairing rejected by intersection count={stats.fourPointPairingRejectedByIntersectionCount}, four-point pairing rejected by degenerate count={stats.fourPointPairingRejectedByDegenerateCount}, four-point pairing fallback count={stats.fourPointPairingFallbackCount}, four-point best score={stats.fourPointBestScore}, four-point generated triangles count={stats.fourPointGeneratedTrianglesCount}, four-point kept triangles count={stats.fourPointKeptTrianglesCount}, four-point discarded triangles count={stats.fourPointDiscardedTrianglesCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point pairing summary: four-point pairing candidates tested count={stats.fourPointPairingCandidatesTestedCount}, four-point pairing A selected count={stats.fourPointPairingASelectedCount}, four-point pairing B selected count={stats.fourPointPairingBSelectedCount}, four-point pairing C selected count={stats.fourPointPairingCSelectedCount}, four-point pairing rejected by same-edge-line count={stats.fourPointPairingRejectedBySameEdgeLineCount}, four-point pairing rejected by intersection count={stats.fourPointPairingRejectedByIntersectionCount}, four-point pairing rejected by degenerate count={stats.fourPointPairingRejectedByDegenerateCount}, four-point pairing fallback count={stats.fourPointPairingFallbackCount}, four-point best score={stats.fourPointBestScore}, four-point generated triangles count={stats.fourPointGeneratedTrianglesCount}, four-point kept triangles count={stats.fourPointKeptTrianglesCount}, four-point discarded triangles count={stats.fourPointDiscardedTrianglesCount}");
         if (trimmer != null && trimmer.debugFourPointClipDetails && debugCandidates.Count > 0)
         {
             debugCandidates.Sort((a, b) => b.suspicion.CompareTo(a.suspicion));
@@ -1847,6 +1848,8 @@ public static class MeshTrimProcessor
         var bestAccepted = new List<int>();
         int bestInside = 0;
         int bestOutside = 0;
+        string[] candidateReasons = { "notTested", "notTested", "notTested" };
+        float[] candidateScores = { float.NaN, float.NaN, float.NaN };
 
         for (int pairIdx = 0; pairIdx < pairings.Length; pairIdx++)
         {
@@ -1856,15 +1859,31 @@ public static class MeshTrimProcessor
             var p1 = boundaryPoints[pairing[1]];
             var p2 = boundaryPoints[pairing[2]];
             var p3 = boundaryPoints[pairing[3]];
+            float lenA = (uv[p0.vertexIndex] - uv[p1.vertexIndex]).magnitude;
+            float lenB = (uv[p2.vertexIndex] - uv[p3.vertexIndex]).magnitude;
+            if (p0.edgeIndex == p1.edgeIndex || p2.edgeIndex == p3.edgeIndex)
+            {
+                stats.fourPointPairingRejectedBySameEdgeLineCount++;
+                candidateReasons[pairIdx] = "rejectedBySameEdgeLine";
+                continue;
+            }
+            if (lenA <= 1e-6f || lenB <= 1e-6f)
+            {
+                stats.fourPointPairingRejectedByDegenerateCount++;
+                candidateReasons[pairIdx] = "rejectedByZeroLengthLine";
+                continue;
+            }
             if (SegmentsIntersect(uv[p0.vertexIndex], uv[p1.vertexIndex], uv[p2.vertexIndex], uv[p3.vertexIndex]))
             {
                 stats.fourPointPairingRejectedByIntersectionCount++;
+                candidateReasons[pairIdx] = "rejectedByLineIntersection";
                 continue;
             }
             BuildFourBoundaryRegions(i0, i1, i2, p0, p1, p2, p3, out var rA, out var rB, out var rMid);
             if (rA.Count < 3 || rB.Count < 3 || rMid.Count < 3)
             {
                 stats.fourPointPairingRejectedByDegenerateCount++;
+                candidateReasons[pairIdx] = "rejectedByDegenerate";
                 continue;
             }
             bool keepA = EstimateKeep(maskData, rA, uv);
@@ -1873,6 +1892,7 @@ public static class MeshTrimProcessor
             if (!keepA && !keepB && !keepMid)
             {
                 stats.fourPointPairingRejectedByDegenerateCount++;
+                candidateReasons[pairIdx] = "rejectedByNoKeepRegion";
                 continue;
             }
             var generatedIndices = new List<int>();
@@ -1913,11 +1933,14 @@ public static class MeshTrimProcessor
             {
                 if (hasInvalidSampling) stats.fourPointFallbackDueToInvalidSampleCount++;
                 stats.fourPointPairingRejectedByDegenerateCount++;
+                candidateReasons[pairIdx] = hasInvalidSampling ? "rejectedByInvalidSampleCount" : "rejectedByInvalidArea";
                 continue;
             }
 
             float tieBreaker = -outsideTriCount * 1e-4f;
             float finalScore = score + tieBreaker;
+            candidateReasons[pairIdx] = "accepted";
+            candidateScores[pairIdx] = finalScore;
             if (finalScore > bestScore)
             {
                 bestScore = finalScore;
@@ -1931,7 +1954,7 @@ public static class MeshTrimProcessor
         {
             stats.fourPointPairingFallbackCount++;
             stats.fourPointClipGeneratedZeroFallbackCount++;
-            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 220f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Texture={textureName}, fallbackUsed=true, fallbackReason=no valid pairing, bestScore=-inf");
+            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 220f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Texture={textureName}, fallbackUsed=true, fallbackReason=no valid pairing, bestScore=-inf, PairingA:reason={candidateReasons[0]},score={candidateScores[0]}, PairingB:reason={candidateReasons[1]},score={candidateScores[1]}, PairingC:reason={candidateReasons[2]},score={candidateScores[2]}");
             return false;
         }
         if (bestPairingIndex == 0) stats.fourPointPairingASelectedCount++;
@@ -1959,7 +1982,7 @@ public static class MeshTrimProcessor
             bp += $" p{bi}:(edge={p.edgeIndex}, t={p.localTOnEdge:F4}, po={p.perimeterOrder:F4}, uv={p.uv}, vi={p.vertexIndex}, in={AlphaMaskProcessor.SampleMask(maskData, p.uv)}, edgeKey=({Math.Min(edgeA, edgeB)},{Math.Max(edgeA, edgeB)}), tc={p.crossing.tCanonical:F4})";
         }
         TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, suspicion,
-            $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Texture={textureName}, selectedPairing={pairingName}, fallbackUsed=false, bestScore={bestScore:F6}, keptTriangles={bestInside}, discardedTriangles={bestOutside}, generatedTriangles={generated}.{bp}");
+            $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Texture={textureName}, selectedPairing={pairingName}, fallbackUsed=false, bestScore={bestScore:F6}, keptTriangles={bestInside}, discardedTriangles={bestOutside}, generatedTriangles={generated}, PairingA:reason={candidateReasons[0]},score={candidateScores[0]}, PairingB:reason={candidateReasons[1]},score={candidateScores[1]}, PairingC:reason={candidateReasons[2]},score={candidateScores[2]}.{bp}");
         return true;
     }
 
