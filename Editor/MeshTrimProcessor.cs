@@ -560,7 +560,10 @@ public static class MeshTrimProcessor
             int i0 = srcIndices[i], i1 = srcIndices[i + 1], i2 = srcIndices[i + 2];
             var all = ScanTriangleBoundary(i0, i1, i2, maskData, trimmer, uv, ref edgeCrossingsTotal, ref sameSignEdgeCrossings, ref multiCrossingEdges);
             int count = all.Count;
-            if (count == 0) tri0++; else if (count == 2) tri2++; else if (count == 4) tri4++; else triComplex++;
+            if (count == 0) tri0++;
+            else if (count == 2) tri2++;
+            else if (count == 4) tri4++;
+            else if (count >= 5) triComplex++;
 
             int emitted = EmitClippedTriangleBudgeted(i0, i1, i2, all, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                 hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, dstIndices, ref stats, ref rejectedDegenerate, ref maxBudgetFallback, ref complexSimplified, ref bridgePairByNeighbor, ref bridgePairByArea);
