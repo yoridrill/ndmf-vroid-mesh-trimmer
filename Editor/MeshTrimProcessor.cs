@@ -122,6 +122,17 @@ public static class MeshTrimProcessor
         public int fourPointGeneratedTriangleOutsideCount;
         public int fourPointReversedSideSuspectedCount;
         public int fourPointFallbackDueToInvalidSampleCount;
+        public int fourPointPairingCandidatesTestedCount;
+        public int fourPointPairingASelectedCount;
+        public int fourPointPairingBSelectedCount;
+        public int fourPointPairingCSelectedCount;
+        public int fourPointPairingRejectedByIntersectionCount;
+        public int fourPointPairingRejectedByDegenerateCount;
+        public int fourPointPairingFallbackCount;
+        public float fourPointBestScore;
+        public int fourPointGeneratedTrianglesCount;
+        public int fourPointKeptTrianglesCount;
+        public int fourPointDiscardedTrianglesCount;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -1083,6 +1094,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Two-boundary summary: two-boundary processed count={stats.twoBoundaryProcessedCount}, two-boundary kept region count={stats.twoBoundaryKeptRegionCount}, two-boundary generated triangles count={stats.twoBoundaryGeneratedTrianglesCount}, two-boundary fallback count={stats.twoBoundaryFallbackCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Four-plus-boundary fallback summary: four-plus-boundary fallback count={stats.fourPlusBoundaryFallbackCount}, four-plus-boundary keep count={stats.fourPlusBoundaryKeepCount}, four-plus-boundary delete count={stats.fourPlusBoundaryDeleteCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, four-point clip generated zero fallback count={stats.fourPointClipGeneratedZeroFallbackCount}, four-point generated triangle inside count={stats.fourPointGeneratedTriangleInsideCount}, four-point generated triangle outside count={stats.fourPointGeneratedTriangleOutsideCount}, four-point reversed-side suspected count={stats.fourPointReversedSideSuspectedCount}, four-point fallback due to invalid sample count={stats.fourPointFallbackDueToInvalidSampleCount}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point pairing summary: four-point pairing candidates tested count={stats.fourPointPairingCandidatesTestedCount}, four-point pairing A selected count={stats.fourPointPairingASelectedCount}, four-point pairing B selected count={stats.fourPointPairingBSelectedCount}, four-point pairing C selected count={stats.fourPointPairingCSelectedCount}, four-point pairing rejected by intersection count={stats.fourPointPairingRejectedByIntersectionCount}, four-point pairing rejected by degenerate count={stats.fourPointPairingRejectedByDegenerateCount}, four-point pairing fallback count={stats.fourPointPairingFallbackCount}, four-point best score={stats.fourPointBestScore}, four-point generated triangles count={stats.fourPointGeneratedTrianglesCount}, four-point kept triangles count={stats.fourPointKeptTrianglesCount}, four-point discarded triangles count={stats.fourPointDiscardedTrianglesCount}");
         return stats;
     }
 
@@ -1789,52 +1801,52 @@ public static class MeshTrimProcessor
         boundaryPoints.Sort((a, b) => a.perimeterOrder.CompareTo(b.perimeterOrder));
         int[][] pairings =
         {
-            new[] { 0, 1, 2, 3 }, // p0-p1, p2-p3
-            new[] { 1, 2, 3, 0 }  // fallback pairing
+            new[] { 0, 1, 2, 3 }, // A
+            new[] { 3, 0, 1, 2 }, // B (p0-p3, p1-p2)
+            new[] { 0, 2, 1, 3 }  // C (p0-p2, p1-p3)
         };
+        float bestScore = float.NegativeInfinity;
+        int bestPairingIndex = -1;
+        var bestAccepted = new List<int>();
+        int bestInside = 0;
+        int bestOutside = 0;
 
-        bool attempted = false;
-        bool hasValidRegions = false;
-        bool hasKeptRegion = false;
-        bool hasInvalidSampling = false;
-        int insideTriCount = 0;
-        int outsideTriCount = 0;
-        var acceptedTriangles = new List<int>();
-
-        foreach (var pairing in pairings)
+        for (int pairIdx = 0; pairIdx < pairings.Length; pairIdx++)
         {
+            var pairing = pairings[pairIdx];
+            stats.fourPointPairingCandidatesTestedCount++;
             var p0 = boundaryPoints[pairing[0]];
             var p1 = boundaryPoints[pairing[1]];
             var p2 = boundaryPoints[pairing[2]];
             var p3 = boundaryPoints[pairing[3]];
-
             if (SegmentsIntersect(uv[p0.vertexIndex], uv[p1.vertexIndex], uv[p2.vertexIndex], uv[p3.vertexIndex]))
             {
+                stats.fourPointPairingRejectedByIntersectionCount++;
                 continue;
             }
-
-            attempted = true;
             BuildFourBoundaryRegions(i0, i1, i2, p0, p1, p2, p3, out var rA, out var rB, out var rMid);
             if (rA.Count < 3 || rB.Count < 3 || rMid.Count < 3)
             {
+                stats.fourPointPairingRejectedByDegenerateCount++;
                 continue;
             }
-            hasValidRegions = true;
             bool keepA = EstimateKeep(maskData, rA, uv);
             bool keepB = EstimateKeep(maskData, rB, uv);
             bool keepMid = EstimateKeep(maskData, rMid, uv);
-            hasKeptRegion = keepA || keepB || keepMid;
-            if (!hasKeptRegion)
+            if (!keepA && !keepB && !keepMid)
             {
+                stats.fourPointPairingRejectedByDegenerateCount++;
                 continue;
             }
             var generatedIndices = new List<int>();
             if (keepA) TriangulateRegion(i0, i1, i2, rA, vertices, uv, trimmer, generatedIndices, ref stats);
             if (keepB) TriangulateRegion(i0, i1, i2, rB, vertices, uv, trimmer, generatedIndices, ref stats);
             if (keepMid) TriangulateRegion(i0, i1, i2, rMid, vertices, uv, trimmer, generatedIndices, ref stats);
-            acceptedTriangles.Clear();
-            insideTriCount = 0;
-            outsideTriCount = 0;
+            var acceptedTriangles = new List<int>();
+            int insideTriCount = 0;
+            int outsideTriCount = 0;
+            float score = 0f;
+            bool hasInvalidSampling = false;
             for (int t = 0; t + 2 < generatedIndices.Count; t += 3)
             {
                 int a = generatedIndices[t];
@@ -1845,6 +1857,8 @@ public static class MeshTrimProcessor
                     hasInvalidSampling = true;
                     continue;
                 }
+                float area = Mathf.Abs(SignedArea(uv[a], uv[b], uv[c])) * 0.5f;
+                score += Mathf.Max(ratio, 1f - ratio) * area;
                 if (ratio >= 0.5f)
                 {
                     acceptedTriangles.Add(a);
@@ -1857,28 +1871,43 @@ public static class MeshTrimProcessor
                     outsideTriCount++;
                 }
             }
-            break;
-        }
+            int generatedTriCount = generatedIndices.Count / 3;
+            if (hasInvalidSampling || generatedTriCount <= 0 || acceptedTriangles.Count == 0)
+            {
+                if (hasInvalidSampling) stats.fourPointFallbackDueToInvalidSampleCount++;
+                stats.fourPointPairingRejectedByDegenerateCount++;
+                continue;
+            }
 
-        if (!attempted || !hasValidRegions || !hasKeptRegion) return false;
-        if (hasInvalidSampling)
-        {
-            stats.fourPointFallbackDueToInvalidSampleCount++;
-            return false;
+            float tieBreaker = -outsideTriCount * 1e-4f;
+            float finalScore = score + tieBreaker;
+            if (finalScore > bestScore)
+            {
+                bestScore = finalScore;
+                bestPairingIndex = pairIdx;
+                bestAccepted = acceptedTriangles;
+                bestInside = insideTriCount;
+                bestOutside = outsideTriCount;
+            }
         }
-        if (acceptedTriangles.Count == 0)
+        if (bestPairingIndex < 0)
         {
+            stats.fourPointPairingFallbackCount++;
             stats.fourPointClipGeneratedZeroFallbackCount++;
             return false;
         }
-        if (outsideTriCount > insideTriCount)
-        {
-            stats.fourPointReversedSideSuspectedCount++;
-        }
-        stats.fourPointGeneratedTriangleInsideCount += insideTriCount;
-        stats.fourPointGeneratedTriangleOutsideCount += outsideTriCount;
-        dstIndices.AddRange(acceptedTriangles);
-        int generated = acceptedTriangles.Count / 3;
+        if (bestPairingIndex == 0) stats.fourPointPairingASelectedCount++;
+        else if (bestPairingIndex == 1) stats.fourPointPairingBSelectedCount++;
+        else if (bestPairingIndex == 2) stats.fourPointPairingCSelectedCount++;
+        if (bestOutside > bestInside) stats.fourPointReversedSideSuspectedCount++;
+        stats.fourPointBestScore = Mathf.Max(stats.fourPointBestScore, bestScore);
+        stats.fourPointGeneratedTriangleInsideCount += bestInside;
+        stats.fourPointGeneratedTriangleOutsideCount += bestOutside;
+        stats.fourPointKeptTrianglesCount += bestInside;
+        stats.fourPointDiscardedTrianglesCount += bestOutside;
+        dstIndices.AddRange(bestAccepted);
+        int generated = bestAccepted.Count / 3;
+        stats.fourPointGeneratedTrianglesCount += generated;
         stats.fourPointClipSuccessCount++;
         stats.fourPointClipGeneratedTriangles += generated;
         return true;
