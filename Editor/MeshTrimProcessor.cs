@@ -143,6 +143,7 @@ public static class MeshTrimProcessor
         public int twoEdgeTwoCrossingsStripKeptCount;
         public int twoEdgeTwoCrossingsStripDiscardedCount;
         public int twoEdgeTwoCrossingsIntervalMismatchCount;
+        public int twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -1125,7 +1126,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Two-boundary summary: two-boundary processed count={stats.twoBoundaryProcessedCount}, two-boundary kept region count={stats.twoBoundaryKeptRegionCount}, two-boundary generated triangles count={stats.twoBoundaryGeneratedTrianglesCount}, two-boundary fallback count={stats.twoBoundaryFallbackCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Four-plus-boundary fallback summary: four-plus-boundary fallback count={stats.fourPlusBoundaryFallbackCount}, four-plus-boundary keep count={stats.fourPlusBoundaryKeepCount}, four-plus-boundary delete count={stats.fourPlusBoundaryDeleteCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, four-point clip generated zero fallback count={stats.fourPointClipGeneratedZeroFallbackCount}, four-point generated triangle inside count={stats.fourPointGeneratedTriangleInsideCount}, four-point generated triangle outside count={stats.fourPointGeneratedTriangleOutsideCount}, four-point reversed-side suspected count={stats.fourPointReversedSideSuspectedCount}, four-point fallback due to invalid sample count={stats.fourPointFallbackDueToInvalidSampleCount}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point pairing summary: four-point pairing candidates tested count={stats.fourPointPairingCandidatesTestedCount}, four-point pairing A selected count={stats.fourPointPairingASelectedCount}, four-point pairing B selected count={stats.fourPointPairingBSelectedCount}, four-point pairing C selected count={stats.fourPointPairingCSelectedCount}, four-point pairing rejected by same-edge-line count={stats.fourPointPairingRejectedBySameEdgeLineCount}, four-point pairing rejected by intersection count={stats.fourPointPairingRejectedByIntersectionCount}, four-point pairing rejected by degenerate count={stats.fourPointPairingRejectedByDegenerateCount}, four-point pairing fallback count={stats.fourPointPairingFallbackCount}, four-point best score={stats.fourPointBestScore}, four-point generated triangles count={stats.fourPointGeneratedTrianglesCount}, four-point kept triangles count={stats.fourPointKeptTrianglesCount}, four-point discarded triangles count={stats.fourPointDiscardedTrianglesCount}, twoEdgeTwoCrossings detected count={stats.twoEdgeTwoCrossingsDetectedCount}, twoEdgeTwoCrossings strip kept count={stats.twoEdgeTwoCrossingsStripKeptCount}, twoEdgeTwoCrossings strip discarded count={stats.twoEdgeTwoCrossingsStripDiscardedCount}, twoEdgeTwoCrossings interval mismatch count={stats.twoEdgeTwoCrossingsIntervalMismatchCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point pairing summary: four-point pairing candidates tested count={stats.fourPointPairingCandidatesTestedCount}, four-point pairing A selected count={stats.fourPointPairingASelectedCount}, four-point pairing B selected count={stats.fourPointPairingBSelectedCount}, four-point pairing C selected count={stats.fourPointPairingCSelectedCount}, four-point pairing rejected by same-edge-line count={stats.fourPointPairingRejectedBySameEdgeLineCount}, four-point pairing rejected by intersection count={stats.fourPointPairingRejectedByIntersectionCount}, four-point pairing rejected by degenerate count={stats.fourPointPairingRejectedByDegenerateCount}, four-point pairing fallback count={stats.fourPointPairingFallbackCount}, four-point best score={stats.fourPointBestScore}, four-point generated triangles count={stats.fourPointGeneratedTrianglesCount}, four-point kept triangles count={stats.fourPointKeptTrianglesCount}, four-point discarded triangles count={stats.fourPointDiscardedTrianglesCount}, twoEdgeTwoCrossings detected count={stats.twoEdgeTwoCrossingsDetectedCount}, twoEdgeTwoCrossings strip kept count={stats.twoEdgeTwoCrossingsStripKeptCount}, twoEdgeTwoCrossings strip discarded count={stats.twoEdgeTwoCrossingsStripDiscardedCount}, twoEdgeTwoCrossings interval mismatch count={stats.twoEdgeTwoCrossingsIntervalMismatchCount}, strip rejected by midpoint containment count={stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount}");
         if (trimmer != null && trimmer.debugFourPointClipDetails && debugCandidates.Count > 0)
         {
             debugCandidates.Sort((a, b) => b.suspicion.CompareTo(a.suspicion));
@@ -2021,8 +2022,8 @@ public static class MeshTrimProcessor
 
         var strip1 = new List<int> { a0.vertexIndex, a1.vertexIndex, b1.vertexIndex, b0.vertexIndex };
         var strip2 = new List<int> { a0.vertexIndex, a1.vertexIndex, b0.vertexIndex, b1.vertexIndex };
-        EvaluateStripCandidate(strip1, i0, i1, i2, vertices, uv, trimmer, maskData, out bool s1Valid, out float s1AreaUv, out bool s1Intersect, out float s1InsideRatio, out List<int> s1Triangles);
-        EvaluateStripCandidate(strip2, i0, i1, i2, vertices, uv, trimmer, maskData, out bool s2Valid, out float s2AreaUv, out bool s2Intersect, out float s2InsideRatio, out List<int> s2Triangles);
+        EvaluateStripCandidate(strip1, i0, i1, i2, vertices, uv, trimmer, maskData, aMid, bMid, out bool s1Valid, out string s1Reason, out float s1AreaUv, out float s1AreaWorld, out bool s1Intersect, out bool s1ContainsMidA, out bool s1ContainsMidB, out float s1InsideRatio, out List<int> s1Triangles);
+        EvaluateStripCandidate(strip2, i0, i1, i2, vertices, uv, trimmer, maskData, aMid, bMid, out bool s2Valid, out string s2Reason, out float s2AreaUv, out float s2AreaWorld, out bool s2Intersect, out bool s2ContainsMidA, out bool s2ContainsMidB, out float s2InsideRatio, out List<int> s2Triangles);
         bool keepStripPreferred = aIn && bIn;
         bool discardStripPreferred = !aIn && !bIn;
         if (aIn != bIn)
@@ -2032,9 +2033,11 @@ public static class MeshTrimProcessor
 
         List<int> selectedTriangles = null;
         string selectedStripCandidate = "none";
+        if (s1Valid && (!s1ContainsMidA || !s1ContainsMidB)) { s1Valid = false; s1Reason = "rejectedByMidpointContainment"; stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount++; }
+        if (s2Valid && (!s2ContainsMidA || !s2ContainsMidB)) { s2Valid = false; s2Reason = "rejectedByMidpointContainment"; stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount++; }
         if (s1Valid || s2Valid)
         {
-            if (!s2Valid || (s1Valid && s1InsideRatio >= s2InsideRatio)) { selectedTriangles = s1Triangles; selectedStripCandidate = "Strip1"; }
+            if (!s2Valid || (s1Valid && s1AreaUv >= s2AreaUv)) { selectedTriangles = s1Triangles; selectedStripCandidate = "Strip1"; }
             else { selectedTriangles = s2Triangles; selectedStripCandidate = "Strip2"; }
         }
 
@@ -2043,31 +2046,37 @@ public static class MeshTrimProcessor
             if (selectedTriangles == null || selectedTriangles.Count == 0) return false;
             dstIndices.AddRange(selectedTriangles);
             stats.twoEdgeTwoCrossingsStripKeptCount++;
-            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 60f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=true, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), edgeAIntervalMid={aMid}, edgeAIntervalInside={aIn}, edgeBIntervalMid={bMid}, edgeBIntervalInside={bIn}, Strip1 order=[a0,a1,b1,b0], areaUv={s1AreaUv:F6}, selfIntersect={s1Intersect}, insideRatio={s1InsideRatio:F3}, Strip2 order=[a0,a1,b0,b1], areaUv={s2AreaUv:F6}, selfIntersect={s2Intersect}, insideRatio={s2InsideRatio:F3}, selectedStripCandidate={selectedStripCandidate}");
+            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 60f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=true, mismatch={aIn!=bIn}, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), midA={aMid}, midAInside={aIn}, midB={bMid}, midBInside={bIn}, Strip1 vertices=[a0,a1,b1,b0], areaUv={s1AreaUv:F6}, areaWorld={s1AreaWorld:F6}, valid={s1Valid}, reason={s1Reason}, selfIntersect={s1Intersect}, containsMidA={s1ContainsMidA}, containsMidB={s1ContainsMidB}, insideRatio={s1InsideRatio:F3}, Strip2 vertices=[a0,a1,b0,b1], areaUv={s2AreaUv:F6}, areaWorld={s2AreaWorld:F6}, valid={s2Valid}, reason={s2Reason}, selfIntersect={s2Intersect}, containsMidA={s2ContainsMidA}, containsMidB={s2ContainsMidB}, insideRatio={s2InsideRatio:F3}, selectedStrip={selectedStripCandidate}");
             return true;
         }
 
         if (discardStripPreferred)
         {
             stats.twoEdgeTwoCrossingsStripDiscardedCount++;
-            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 80f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), edgeAIntervalMid={aMid}, edgeAIntervalInside={aIn}, edgeBIntervalMid={bMid}, edgeBIntervalInside={bIn}, Strip1 order=[a0,a1,b1,b0], areaUv={s1AreaUv:F6}, selfIntersect={s1Intersect}, insideRatio={s1InsideRatio:F3}, Strip2 order=[a0,a1,b0,b1], areaUv={s2AreaUv:F6}, selfIntersect={s2Intersect}, insideRatio={s2InsideRatio:F3}, selectedStripCandidate={selectedStripCandidate}, fallbackReason=strip outside");
+            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 80f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, mismatch={aIn!=bIn}, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), midA={aMid}, midAInside={aIn}, midB={bMid}, midBInside={bIn}, Strip1 valid={s1Valid}, reason={s1Reason}, containsMidA={s1ContainsMidA}, containsMidB={s1ContainsMidB}, Strip2 valid={s2Valid}, reason={s2Reason}, containsMidA={s2ContainsMidA}, containsMidB={s2ContainsMidB}, selectedStrip={selectedStripCandidate}, fallbackReason=strip outside");
             return false;
         }
 
         stats.twoEdgeTwoCrossingsStripDiscardedCount++;
-        TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 80f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), edgeAIntervalMid={aMid}, edgeAIntervalInside={aIn}, edgeBIntervalMid={bMid}, edgeBIntervalInside={bIn}, Strip1 order=[a0,a1,b1,b0], areaUv={s1AreaUv:F6}, selfIntersect={s1Intersect}, insideRatio={s1InsideRatio:F3}, Strip2 order=[a0,a1,b0,b1], areaUv={s2AreaUv:F6}, selfIntersect={s2Intersect}, insideRatio={s2InsideRatio:F3}, selectedStripCandidate={selectedStripCandidate}, fallbackReason=two-edge interval mismatch");
+        TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 80f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, mismatch={aIn!=bIn}, edgeA={edgeA}, edgeB={edgeB}, midA={aMid}, midAInside={aIn}, midB={bMid}, midBInside={bIn}, Strip1 valid={s1Valid}, reason={s1Reason}, containsMidA={s1ContainsMidA}, containsMidB={s1ContainsMidB}, Strip2 valid={s2Valid}, reason={s2Reason}, containsMidA={s2ContainsMidA}, containsMidB={s2ContainsMidB}, selectedStrip={selectedStripCandidate}, fallbackReason=two-edge interval mismatch");
         return false;
     }
 
-    private static void EvaluateStripCandidate(List<int> poly, int i0, int i1, int i2, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, AlphaMaskProcessor.AlphaMaskData maskData, out bool valid, out float areaUv, out bool selfIntersect, out float insideRatio, out List<int> keptTriangles)
+    private static void EvaluateStripCandidate(List<int> poly, int i0, int i1, int i2, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, AlphaMaskProcessor.AlphaMaskData maskData, Vector2 midA, Vector2 midB, out bool valid, out string reason, out float areaUv, out float areaWorld, out bool selfIntersect, out bool containsMidA, out bool containsMidB, out float insideRatio, out List<int> keptTriangles)
     {
         keptTriangles = new List<int>();
+        reason = "valid";
         areaUv = Mathf.Abs(SignedArea(uv[poly[0]], uv[poly[1]], uv[poly[2]])) * 0.5f + Mathf.Abs(SignedArea(uv[poly[0]], uv[poly[2]], uv[poly[3]])) * 0.5f;
         selfIntersect = SegmentsIntersect(uv[poly[0]], uv[poly[1]], uv[poly[2]], uv[poly[3]]) || SegmentsIntersect(uv[poly[1]], uv[poly[2]], uv[poly[3]], uv[poly[0]]);
+        containsMidA = PointInTriangleUv(midA, uv[poly[0]], uv[poly[1]], uv[poly[2]]) || PointInTriangleUv(midA, uv[poly[0]], uv[poly[2]], uv[poly[3]]);
+        containsMidB = PointInTriangleUv(midB, uv[poly[0]], uv[poly[1]], uv[poly[2]]) || PointInTriangleUv(midB, uv[poly[0]], uv[poly[2]], uv[poly[3]]);
+        areaWorld = Vector3.Cross(vertices[poly[1]] - vertices[poly[0]], vertices[poly[2]] - vertices[poly[0]]).magnitude * 0.5f
+                  + Vector3.Cross(vertices[poly[2]] - vertices[poly[0]], vertices[poly[3]] - vertices[poly[0]]).magnitude * 0.5f;
         if (selfIntersect || areaUv < trimmer.minTriangleUvArea)
         {
-            valid = false; insideRatio = 0f; return;
+            valid = false; reason = selfIntersect ? "invalidSelfIntersect" : "invalidAreaUv"; insideRatio = 0f; return;
         }
+        if (areaWorld < trimmer.minTriangleWorldArea) { valid = false; reason = "invalidAreaWorld"; insideRatio = 0f; return; }
         var generated = new List<int>();
         var dummy = new TrimStats();
         TriangulateRegion(i0, i1, i2, poly, vertices, uv, trimmer, generated, ref dummy);
@@ -2085,6 +2094,7 @@ public static class MeshTrimProcessor
         }
         insideRatio = n > 0 ? sum / n : 0f;
         valid = generated.Count >= 3;
+        if (!valid) reason = "invalidTriangulation";
     }
 
     private static void TryAddFourPointDebugCandidate(NDMFVRoidMeshTrimmer trimmer, List<FourPointDebugCandidate> list, string materialName, float suspicion, string block)
