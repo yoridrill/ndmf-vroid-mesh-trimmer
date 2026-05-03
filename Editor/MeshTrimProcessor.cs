@@ -150,6 +150,9 @@ public static class MeshTrimProcessor
         public int legacySingleCutFailedCount;
         public int legacySingleCutAttemptCount;
         public int fallbackToOldKeepDeleteCount;
+        public int finalPathTwoLineCount;
+        public int finalPathLegacySingleCutCount;
+        public int finalPathOldFallbackCount;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -750,6 +753,7 @@ public static class MeshTrimProcessor
                 {
                     twoLineSucceeded = true;
                     if (trimmer.debugFourPointClipDetails) Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] triangleIndex={triIndex}, attemptedTwoLine={attemptedTwoLine}, twoLineSucceeded={twoLineSucceeded}, fellBackToLegacySingleCut={fellBackToLegacySingleCut}, legacySingleCutSucceeded={legacySingleCutSucceeded}, finalPath=twoLine");
+                    stats.finalPathTwoLineCount++;
                     triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
                     continue;
                 }
@@ -761,6 +765,7 @@ public static class MeshTrimProcessor
                     legacySingleCutSucceeded = true;
                     stats.legacySingleCutSucceededAfterTwoLineFailureCount++;
                     if (trimmer.debugFourPointClipDetails) Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] triangleIndex={triIndex}, attemptedTwoLine={attemptedTwoLine}, twoLineSucceeded={twoLineSucceeded}, fellBackToLegacySingleCut={fellBackToLegacySingleCut}, legacySingleCutSucceeded={legacySingleCutSucceeded}, finalPath=legacySingleCut");
+                    stats.finalPathLegacySingleCutCount++;
                     triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 1));
                     continue;
                 }
@@ -772,6 +777,7 @@ public static class MeshTrimProcessor
                 stats.fourPlusBoundaryFallbackCount++;
                 stats.fourPointClipFallbackCount++;
                 stats.fallbackToOldKeepDeleteCount++;
+                if (boundaryPointsDetected == 4) stats.finalPathOldFallbackCount++;
                 if (boundaryPointsDetected == 4 && trimmer.debugFourPointClipDetails) Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] triangleIndex={triIndex}, attemptedTwoLine={attemptedTwoLine}, twoLineSucceeded={twoLineSucceeded}, fellBackToLegacySingleCut={fellBackToLegacySingleCut}, legacySingleCutSucceeded={legacySingleCutSucceeded}, finalPath=oldFallback");
                 const int sampleCount = 13;
                 int expandedInsideCount = CountExpandedInsideSamples(maskData, uv[i0], uv[i1], uv[i2], in0, in1, in2, centroidIn);
@@ -1158,6 +1164,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, four-point clip generated zero fallback count={stats.fourPointClipGeneratedZeroFallbackCount}, four-point generated triangle inside count={stats.fourPointGeneratedTriangleInsideCount}, four-point generated triangle outside count={stats.fourPointGeneratedTriangleOutsideCount}, four-point reversed-side suspected count={stats.fourPointReversedSideSuspectedCount}, four-point fallback due to invalid sample count={stats.fourPointFallbackDueToInvalidSampleCount}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point pairing summary: four-point pairing candidates tested count={stats.fourPointPairingCandidatesTestedCount}, four-point pairing A selected count={stats.fourPointPairingASelectedCount}, four-point pairing B selected count={stats.fourPointPairingBSelectedCount}, four-point pairing C selected count={stats.fourPointPairingCSelectedCount}, four-point pairing rejected by same-edge-line count={stats.fourPointPairingRejectedBySameEdgeLineCount}, four-point pairing rejected by intersection count={stats.fourPointPairingRejectedByIntersectionCount}, four-point pairing rejected by degenerate count={stats.fourPointPairingRejectedByDegenerateCount}, four-point pairing fallback count={stats.fourPointPairingFallbackCount}, four-point best score={stats.fourPointBestScore}, four-point generated triangles count={stats.fourPointGeneratedTrianglesCount}, four-point kept triangles count={stats.fourPointKeptTrianglesCount}, four-point discarded triangles count={stats.fourPointDiscardedTrianglesCount}, twoEdgeTwoCrossings detected count={stats.twoEdgeTwoCrossingsDetectedCount}, twoEdgeTwoCrossings strip kept count={stats.twoEdgeTwoCrossingsStripKeptCount}, twoEdgeTwoCrossings strip discarded count={stats.twoEdgeTwoCrossingsStripDiscardedCount}, twoEdgeTwoCrossings interval mismatch count={stats.twoEdgeTwoCrossingsIntervalMismatchCount}, strip rejected by midpoint containment count={stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount}, twoEdgeTwoCrossings alt outside used count={stats.twoEdgeTwoCrossingsAltOutsideUsedCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point fallback path summary: fallback to legacy single-cut count={stats.fallbackToLegacySingleCutCount}, legacy single-cut attempt count={stats.legacySingleCutAttemptCount}, legacy single-cut succeeded after two-line failure count={stats.legacySingleCutSucceededAfterTwoLineFailureCount}, legacy single-cut failed count={stats.legacySingleCutFailedCount}, fallback to old keep/delete count={stats.fallbackToOldKeepDeleteCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point final path summary: finalPath=twoLine count={stats.finalPathTwoLineCount}, finalPath=legacySingleCut count={stats.finalPathLegacySingleCutCount}, finalPath=oldFallback count={stats.finalPathOldFallbackCount}");
         if (trimmer != null && trimmer.debugFourPointClipDetails && debugCandidates.Count > 0)
         {
             debugCandidates.Sort((a, b) => b.suspicion.CompareTo(a.suspicion));
