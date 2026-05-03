@@ -676,6 +676,29 @@ public static class MeshTrimProcessor
             if (!crossByEdge.ContainsKey(key)) crossByEdge[key] = crossings[c];
         }
 
+        if (crossings.Count == 2 && (insideCount == 0 || insideCount == 3))
+        {
+            // Same-sign endpoints with edge-local reversals: choose a single cap triangle from the nearest original vertex.
+            int ca = CreateCrossingVertex(crossings[0].edgeStart, crossings[0].edgeEnd, crossByEdge, createdVertexByEdge, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+            int cb = CreateCrossingVertex(crossings[1].edgeStart, crossings[1].edgeEnd, crossByEdge, createdVertexByEdge, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+            int[] tri = { i0, i1, i2 };
+            int bestV = tri[0];
+            float bestD = float.MaxValue;
+            Vector2 cutMid = (uv[ca] + uv[cb]) * 0.5f;
+            for (int k = 0; k < 3; k++)
+            {
+                float d = (uv[tri[k]] - cutMid).sqrMagnitude;
+                if (d < bestD) { bestD = d; bestV = tri[k]; }
+            }
+            Vector2 probe = (uv[bestV] + uv[ca] + uv[cb]) / 3f;
+            bool keepCap = AlphaMaskProcessor.SampleMask(maskData, probe);
+            int before = dstIndices.Count;
+            if (keepCap) AddTriangle(dstIndices, bestV, ca, cb, vertices, uv, trimmer, ref stats);
+            else AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+            if (dstIndices.Count == before) rejectedDegenerate++;
+            return 1;
+        }
+
         if (insideCount == 1)
         {
             int iv=in0?i0:(in1?i1:i2); int oa=iv==i0?i1:i0; int ob=iv==i2?i1:i2;
