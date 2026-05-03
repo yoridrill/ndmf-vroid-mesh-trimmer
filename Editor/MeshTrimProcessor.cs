@@ -492,6 +492,13 @@ public static class MeshTrimProcessor
         return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
     }
 
+    private static long MakeEdgeKey(int a, int b)
+    {
+        int lo = Math.Min(a, b);
+        int hi = Math.Max(a, b);
+        return ((long)lo << 32) | (uint)hi;
+    }
+
     private static bool IsConvexLike(Vector2 a, Vector2 b, Vector2 c, Vector2 d)
     {
         float z1 = SignedArea(a, b, c);
