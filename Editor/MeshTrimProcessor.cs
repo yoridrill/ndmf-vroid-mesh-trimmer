@@ -18,6 +18,15 @@ public static class MeshTrimProcessor
         }
     }
 
+    public struct VertexData
+    {
+        public Vector3 position;
+        public Vector3 normal;
+        public Vector4 tangent;
+        public Color color;
+        public BoneWeight boneWeight;
+    }
+
     private class SubMeshTask
     {
         public AlphaMaskProcessor.AlphaMaskData maskData;
@@ -526,7 +535,7 @@ public static class MeshTrimProcessor
         TrimStats stats = new TrimStats();
         var triangleResults = new List<TriangleTrimResult>(srcIndices.Length / 3);
         var edgeCuts = new List<EdgeCutInfo>();
-        EdgeIntersectionCache cache = new EdgeIntersectionCache();
+        EdgeCrossingCache cache = new EdgeCrossingCache();
 
         // Prepass: generate and record all direct edge intersections first.
         for (int i = 0; i < srcIndices.Length; i += 3)
@@ -875,6 +884,7 @@ public static class MeshTrimProcessor
             edgeCuts[i] = e;
         }
         stats.outputTriangles = dstIndices.Count / 3;
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] EdgeCrossingCache created count={cache.CreatedCount}, hit count={cache.HitCount}, shared edge crossings reused count={cache.ReusedCount}");
         return stats;
     }
 
@@ -958,25 +968,47 @@ public static class MeshTrimProcessor
         bool hasColors,
         bool hasBoneWeights,
         List<VertexSource> vertexSources,
-        EdgeIntersectionCache cache,
+        EdgeCrossingCache cache,
         ref TrimStats stats)
     {
-        if (cache.TryGet(insideIndex, outsideIndex, out int cached))
+        var edgeKey = new EdgeKey(insideIndex, outsideIndex);
+        var crossings = cache.GetOrCreateEdgeCrossings(edgeKey);
+        if (crossings.Count > 0)
         {
-            return cached;
+            return crossings[0].vertexIndex;
         }
 
-        Vector2 uvIn = uv[insideIndex];
-        Vector2 uvOut = uv[outsideIndex];
+        bool localMatchesCanonical = insideIndex == edgeKey.a;
+        int canonicalStart = edgeKey.a;
+        int canonicalEnd = edgeKey.b;
+
+        Vector2 uvStart = uv[canonicalStart];
+        Vector2 uvEnd = uv[canonicalEnd];
+        bool startInside = AlphaMaskProcessor.SampleMask(maskData, uvStart);
+        bool endInside = AlphaMaskProcessor.SampleMask(maskData, uvEnd);
+
+        if (startInside == endInside)
+        {
+            int fallbackIndex = localMatchesCanonical ? insideIndex : outsideIndex;
+            crossings.Add(new EdgeCrossing
+            {
+                tCanonical = localMatchesCanonical ? 0f : 1f,
+                vertexIndex = fallbackIndex,
+                uv = uv[fallbackIndex],
+                vertexData = BuildVertexData(fallbackIndex, vertices, normals, tangents, colors, boneWeights, hasNormals, hasTangents, hasColors, hasBoneWeights),
+                weightedSource = vertexSources[fallbackIndex]
+            });
+            return fallbackIndex;
+        }
 
         float lo = 0f;
         float hi = 1f;
         for (int i = 0; i < 10; i++)
         {
             float mid = (lo + hi) * 0.5f;
-            Vector2 uvMid = Vector2.LerpUnclamped(uvIn, uvOut, mid);
-            bool inside = AlphaMaskProcessor.SampleMask(maskData, uvMid);
-            if (inside)
+            Vector2 uvMid = Vector2.LerpUnclamped(uvStart, uvEnd, mid);
+            bool midInside = AlphaMaskProcessor.SampleMask(maskData, uvMid);
+            if (midInside == startInside)
             {
                 lo = mid;
             }
@@ -986,24 +1018,56 @@ public static class MeshTrimProcessor
             }
         }
 
-        float t = lo;
+        float tCanonical = lo;
+        float localT = localMatchesCanonical ? tCanonical : (1f - tCanonical);
 
-        if (t <= trimmer.minIntersectionT)
+        int newIndex;
+        if (localT <= trimmer.minIntersectionT)
         {
-            cache.Set(insideIndex, outsideIndex, insideIndex);
-            return insideIndex;
+            newIndex = insideIndex;
+        }
+        else if (localT >= trimmer.maxIntersectionT)
+        {
+            newIndex = outsideIndex;
+        }
+        else
+        {
+            newIndex = AddInterpolatedVertex(insideIndex, outsideIndex, localT, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
         }
 
-        if (t >= trimmer.maxIntersectionT)
+        crossings.Add(new EdgeCrossing
         {
-            cache.Set(insideIndex, outsideIndex, outsideIndex);
-            return outsideIndex;
-        }
+            tCanonical = tCanonical,
+            vertexIndex = newIndex,
+            uv = uv[newIndex],
+            vertexData = BuildVertexData(newIndex, vertices, normals, tangents, colors, boneWeights, hasNormals, hasTangents, hasColors, hasBoneWeights),
+            weightedSource = vertexSources[newIndex]
+        });
 
-        int newIndex = AddInterpolatedVertex(insideIndex, outsideIndex, t, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
-        cache.Set(insideIndex, outsideIndex, newIndex);
         return newIndex;
+    }
+
+    private static VertexData BuildVertexData(
+        int index,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasColors,
+        bool hasBoneWeights)
+    {
+        return new VertexData
+        {
+            position = vertices[index],
+            normal = hasNormals ? normals[index] : Vector3.zero,
+            tangent = hasTangents ? tangents[index] : Vector4.zero,
+            color = hasColors ? colors[index] : Color.white,
+            boneWeight = hasBoneWeights ? boneWeights[index] : default
+        };
     }
 
     private static bool TryCreateIntersectionFromInsideSegment(
