@@ -915,10 +915,11 @@ public static class MeshTrimProcessor
             for (int i = 0; i < triangleResults.Count; i++)
             {
                 var r = triangleResults[i];
-                bool removedCandidate = r.keptAreaRatio <= 0f && (r.state == TriangleTrimState.Ambiguous || r.state == TriangleTrimState.StrongTrim);
-                bool smallAreaCandidate = r.state == TriangleTrimState.Clipped &&
-                                          (r.keptAreaRatio < trimmer.bridgeSmallKeptAreaRatio ||
-                                           r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio);
+                bool removedCandidate = IsBridgeCandidate(r, trimmer) &&
+                                        r.keptAreaRatio <= 0f &&
+                                        (r.state == TriangleTrimState.Ambiguous || r.state == TriangleTrimState.StrongTrim);
+                bool smallAreaCandidate = IsBridgeCandidate(r, trimmer) &&
+                                          r.state == TriangleTrimState.Clipped;
 
                 int triBase = r.triangleIndex * 3;
                 if (triBase < 0 || triBase + 2 >= srcIndices.Length) continue;
@@ -1062,6 +1063,14 @@ public static class MeshTrimProcessor
         }
         Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}, BridgeCandidatesCount={bridgeStats.bridgeCandidatesCount}, AmbiguousBridgeCandidates={bridgeStats.ambiguousBridgeCandidates}, SmallKeptAreaBridgeCandidates={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemovedAreaBridgeCandidates={bridgeStats.smallRemovedAreaBridgeCandidates}, ContinuityIssueBridgeCandidates={bridgeStats.continuityIssueBridgeCandidates}, TrianglesWithTwoCutEdges={bridgeStats.trianglesWithTwoCutEdges}, BridgeCutAppliedCount={bridgeStats.bridgeCutAppliedCount}, BridgeCutRejectedCount={bridgeStats.bridgeCutRejectedCount}, ReplacedClippedResultCount={bridgeStats.replacedClippedResultCount}, KeptSideDecidedByNeighborCount={bridgeStats.keptSideDecidedByNeighborCount}, KeptSideDecidedByMaskCount={bridgeStats.keptSideDecidedByMaskCount}");
         return stats;
+    }
+
+    private static bool IsBridgeCandidate(TriangleTrimResult r, NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (r.state == TriangleTrimState.Ambiguous) return true;
+        if (r.state != TriangleTrimState.Clipped) return false;
+        return r.keptAreaRatio < trimmer.bridgeSmallKeptAreaRatio ||
+               r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio;
     }
 
 
