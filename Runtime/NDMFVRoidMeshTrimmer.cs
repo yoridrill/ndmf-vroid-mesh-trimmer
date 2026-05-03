@@ -58,6 +58,8 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour, IEditorOnly
     [Range(0f, 1f)] public float minIntersectionT = 0.02f;
 
     [Range(0f, 1f)] public float maxIntersectionT = 0.98f;
+    [Min(1)] public int edgeSampleSegments = 4;
+    [Min(1)] public int maxCrossingsPerEdge = 2;
 
     [Min(0f)] public float minTriangleUvArea = 0.0000001f;
     [Min(0f)] public float minTriangleWorldArea = 0.0000001f;
