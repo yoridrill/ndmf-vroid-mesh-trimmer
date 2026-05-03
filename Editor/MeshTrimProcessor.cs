@@ -46,6 +46,12 @@ public static class MeshTrimProcessor
         public float keptAreaRatio;
         public float removedAreaRatio;
         public int cutEdges;
+        public int[] cutPoints;
+        public Vector2 keptRegionCentroidUv;
+        public Vector2 removedRegionCentroidUv;
+        public int keptRegionContactEdges;
+        public int removedRegionContactEdges;
+        public int generatedTriangles;
     }
 
     private struct EdgeCutInfo
@@ -56,6 +62,9 @@ public static class MeshTrimProcessor
         public Vector2 cutPointUv;
         public int edgeA;
         public int edgeB;
+        public Vector2 keptSideCentroidUv;
+        public Vector2 removedSideCentroidUv;
+        public bool keptSideUsesEdgeA;
     }
 
     private struct BridgeStats
@@ -1113,7 +1122,10 @@ public static class MeshTrimProcessor
             cutPointIndex = cutPointIndex,
             cutPointUv = uv[cutPointIndex],
             edgeA = edgeA,
-            edgeB = edgeB
+            edgeB = edgeB,
+            keptSideCentroidUv = uv[edgeA],
+            removedSideCentroidUv = uv[edgeB],
+            keptSideUsesEdgeA = true
         });
     }
 
@@ -1131,7 +1143,13 @@ public static class MeshTrimProcessor
             removedAreaUv = removed,
             keptAreaRatio = area > 0f ? kept / area : 0f,
             removedAreaRatio = area > 0f ? removed / area : 0f,
-            cutEdges = cutEdges
+            cutEdges = cutEdges,
+            cutPoints = Array.Empty<int>(),
+            keptRegionCentroidUv = (uv[i0] + uv[i1] + uv[i2]) / 3f,
+            removedRegionCentroidUv = (uv[i0] + uv[i1] + uv[i2]) / 3f,
+            keptRegionContactEdges = cutEdges,
+            removedRegionContactEdges = cutEdges,
+            generatedTriangles = state == TriangleTrimState.Clipped ? 1 : (state == TriangleTrimState.StrongKeep ? 1 : 0)
         };
     }
 
