@@ -107,6 +107,10 @@ public static class MeshTrimProcessor
         public int centroidOnlyDeletedCount;
         public int zeroBoundaryMixedKeepCount;
         public int zeroBoundaryMixedDeleteCount;
+        public int twoBoundaryProcessedCount;
+        public int twoBoundaryKeptRegionCount;
+        public int twoBoundaryGeneratedTrianglesCount;
+        public int twoBoundaryFallbackCount;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -675,6 +679,12 @@ public static class MeshTrimProcessor
 
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
 
+            if (boundaryPointsDetected == 2 && TryProcessTwoBoundaryTriangle(i0, i1, i2, boundaryPoints, insideCount, maskData, trimmer, vertices, uv, dstIndices, ref stats))
+            {
+                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 1));
+                continue;
+            }
+
             if (insideCount == 3)
             {
                 if (!m01In || !m12In || !m20In || !centroidIn)
@@ -1030,6 +1040,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer] EdgeCrossingCache created count={cache.CreatedCount}, hit count={cache.HitCount}, shared edge crossings reused count={cache.ReusedCount}, edges with 0 crossings={edgesWith0Crossings}, edges with 1 crossing={edgesWith1Crossing}, edges with 2 crossings={edgesWith2Crossings}, max crossings on edge={maxCrossingsOnEdge}, triangles with 4+ boundary points detected={stats.trianglesWithFourOrMoreBoundaryPoints}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Triangle boundary points summary: triangles with 0 boundary points={trianglesWith0BoundaryPoints}, triangles with 1 boundary point={trianglesWith1BoundaryPoint}, triangles with 2 boundary points={trianglesWith2BoundaryPoints}, triangles with 3 boundary points={trianglesWith3BoundaryPoints}, triangles with 4 boundary points={trianglesWith4BoundaryPoints}, triangles with 5+ boundary points={trianglesWith5OrMoreBoundaryPoints}, max boundary points on triangle={maxBoundaryPointsOnTriangle}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Zero-boundary sampling summary: zero-boundary keep count={stats.zeroBoundaryKeepCount}, zero-boundary delete count={stats.zeroBoundaryDeleteCount}, centroid-only deleted count={stats.centroidOnlyDeletedCount}, zero-boundary mixed keep count={stats.zeroBoundaryMixedKeepCount}, zero-boundary mixed delete count={stats.zeroBoundaryMixedDeleteCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Two-boundary summary: two-boundary processed count={stats.twoBoundaryProcessedCount}, two-boundary kept region count={stats.twoBoundaryKeptRegionCount}, two-boundary generated triangles count={stats.twoBoundaryGeneratedTrianglesCount}, two-boundary fallback count={stats.twoBoundaryFallbackCount}");
         return stats;
     }
 
@@ -1637,6 +1648,87 @@ public static class MeshTrimProcessor
             {
                 renderer.SetBlendShapeWeight(newIndex, weights[i]);
             }
+        }
+    }
+
+
+    private static bool TryProcessTwoBoundaryTriangle(
+        int i0,
+        int i1,
+        int i2,
+        List<BoundaryPoint> boundaryPoints,
+        int insideCount,
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices,
+        List<Vector2> uv,
+        List<int> dstIndices,
+        ref TrimStats stats)
+    {
+        if (boundaryPoints == null || boundaryPoints.Count != 2) return false;
+        var tri = new int[] { i0, i1, i2 };
+        BoundaryPoint p0 = boundaryPoints[0];
+        BoundaryPoint p1 = boundaryPoints[1];
+        int e0 = p0.edgeIndex;
+        int e1 = p1.edgeIndex;
+        if (e0 < 0 || e0 > 2 || e1 < 0 || e1 > 2 || e0 == e1)
+        {
+            stats.twoBoundaryFallbackCount++;
+            return false;
+        }
+
+        List<int> BuildRegion(int startEdge, int endEdge, int startPoint, int endPoint)
+        {
+            var poly = new List<int>(4) { startPoint };
+            int edge = startEdge;
+            while (true)
+            {
+                poly.Add(tri[(edge + 1) % 3]);
+                if (edge == endEdge) break;
+                edge = (edge + 1) % 3;
+            }
+            poly.Add(endPoint);
+            return poly;
+        }
+
+        var regionA = BuildRegion(e0, e1, p0.vertexIndex, p1.vertexIndex);
+        var regionB = BuildRegion(e1, e0, p1.vertexIndex, p0.vertexIndex);
+
+        bool keepA = AlphaMaskProcessor.SampleMask(maskData, AverageUv(regionA, uv));
+        bool keepB = AlphaMaskProcessor.SampleMask(maskData, AverageUv(regionB, uv));
+        if (!keepA && !keepB)
+        {
+            if (insideCount > 0) keepA = true;
+            else return true;
+        }
+
+        stats.twoBoundaryProcessedCount++;
+        int before = dstIndices.Count / 3;
+        if (keepA) { TriangulateRegion(i0, i1, i2, regionA, vertices, uv, trimmer, dstIndices, ref stats); stats.twoBoundaryKeptRegionCount++; }
+        if (keepB) { TriangulateRegion(i0, i1, i2, regionB, vertices, uv, trimmer, dstIndices, ref stats); stats.twoBoundaryKeptRegionCount++; }
+        stats.twoBoundaryGeneratedTrianglesCount += (dstIndices.Count / 3) - before;
+        return true;
+    }
+
+    private static Vector2 AverageUv(List<int> polygon, List<Vector2> uv)
+    {
+        Vector2 sum = Vector2.zero;
+        for (int i = 0; i < polygon.Count; i++) sum += uv[polygon[i]];
+        return sum / Mathf.Max(1, polygon.Count);
+    }
+
+    private static void TriangulateRegion(int srcA, int srcB, int srcC, List<int> poly, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, List<int> dstIndices, ref TrimStats stats)
+    {
+        if (poly.Count == 3)
+        {
+            AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[1], poly[2], vertices, uv, trimmer, ref stats);
+            return;
+        }
+        if (poly.Count == 4)
+        {
+            AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[1], poly[2], vertices, uv, trimmer, ref stats);
+            AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[2], poly[3], vertices, uv, trimmer, ref stats);
+            return;
         }
     }
 
