@@ -152,6 +152,7 @@ public static class MeshTrimProcessor
             Debug.Log("[NDMF VRoid Mesh Trimmer] Trimmer is null. Skip.");
             return;
         }
+        Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] ApplyTrim entered. RendererCountTargets={trimmer.targets?.Count ?? 0}, debugFourPointClipDetails={trimmer.debugFourPointClipDetails}, max={trimmer.debugFourPointClipMaxTriangles}, filter={trimmer.debugFourPointMaterialFilter}, preserveBlendShapes={preserveBlendShapes}");
 
         Dictionary<Texture2D, AlphaMaskProcessor.AlphaMaskData> maskCache = new Dictionary<Texture2D, AlphaMaskProcessor.AlphaMaskData>();
         Dictionary<SkinnedMeshRenderer, Dictionary<int, SubMeshTask>> tasksByRenderer = new Dictionary<SkinnedMeshRenderer, Dictionary<int, SubMeshTask>>();
