@@ -1118,6 +1118,10 @@ public static class MeshTrimProcessor
             int emit = Mathf.Min(maxCount, debugCandidates.Count);
             for (int i = 0; i < emit; i++) Debug.Log(debugCandidates[i].logBlock);
         }
+        else if (trimmer != null && trimmer.debugFourPointClipDetails)
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] No debug candidates emitted. Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Filter={trimmer.debugFourPointMaterialFilter}, TrianglesWith4BoundaryPoints={trianglesWith4BoundaryPoints}");
+        }
         return stats;
     }
 
