@@ -2008,32 +2008,83 @@ public static class MeshTrimProcessor
         stats.twoEdgeTwoCrossingsDetectedCount++;
         var edgeAPoints = boundaryPoints.FindAll(p => p.edgeIndex == edgeA);
         var edgeBPoints = boundaryPoints.FindAll(p => p.edgeIndex == edgeB);
+        edgeAPoints.Sort((x, y) => x.localTOnEdge.CompareTo(y.localTOnEdge));
+        edgeBPoints.Sort((x, y) => x.localTOnEdge.CompareTo(y.localTOnEdge));
+        var a0 = edgeAPoints[0];
+        var a1 = edgeAPoints[1];
+        var b0 = edgeBPoints[0];
+        var b1 = edgeBPoints[1];
         Vector2 aMid = (edgeAPoints[0].uv + edgeAPoints[1].uv) * 0.5f;
         Vector2 bMid = (edgeBPoints[0].uv + edgeBPoints[1].uv) * 0.5f;
         bool aIn = AlphaMaskProcessor.SampleMask(maskData, aMid);
         bool bIn = AlphaMaskProcessor.SampleMask(maskData, bMid);
+
+        var strip1 = new List<int> { a0.vertexIndex, a1.vertexIndex, b1.vertexIndex, b0.vertexIndex };
+        var strip2 = new List<int> { a0.vertexIndex, a1.vertexIndex, b0.vertexIndex, b1.vertexIndex };
+        EvaluateStripCandidate(strip1, i0, i1, i2, vertices, uv, trimmer, maskData, out bool s1Valid, out float s1AreaUv, out bool s1Intersect, out float s1InsideRatio, out List<int> s1Triangles);
+        EvaluateStripCandidate(strip2, i0, i1, i2, vertices, uv, trimmer, maskData, out bool s2Valid, out float s2AreaUv, out bool s2Intersect, out float s2InsideRatio, out List<int> s2Triangles);
+        bool keepStripPreferred = aIn && bIn;
+        bool discardStripPreferred = !aIn && !bIn;
         if (aIn != bIn)
         {
             stats.twoEdgeTwoCrossingsIntervalMismatchCount++;
-            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 140f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, edgeA={edgeA}, edgeAIntervalMid={aMid}, edgeAIntervalInside={aIn}, edgeB={edgeB}, edgeBIntervalMid={bMid}, edgeBIntervalInside={bIn}, fallbackReason=two-edge interval mismatch");
-            return false;
         }
 
-        if (aIn && bIn)
+        List<int> selectedTriangles = null;
+        string selectedStripCandidate = "none";
+        if (s1Valid || s2Valid)
         {
-            var stripPoly = new List<int> { boundaryPoints[0].vertexIndex, boundaryPoints[1].vertexIndex, boundaryPoints[2].vertexIndex, boundaryPoints[3].vertexIndex };
-            int before = dstIndices.Count / 3;
-            TriangulateRegion(i0, i1, i2, stripPoly, vertices, uv, trimmer, dstIndices, ref stats);
-            int generated = (dstIndices.Count / 3) - before;
-            if (generated <= 0) return false;
+            if (!s2Valid || (s1Valid && s1InsideRatio >= s2InsideRatio)) { selectedTriangles = s1Triangles; selectedStripCandidate = "Strip1"; }
+            else { selectedTriangles = s2Triangles; selectedStripCandidate = "Strip2"; }
+        }
+
+        if (keepStripPreferred)
+        {
+            if (selectedTriangles == null || selectedTriangles.Count == 0) return false;
+            dstIndices.AddRange(selectedTriangles);
             stats.twoEdgeTwoCrossingsStripKeptCount++;
-            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 60f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=true, edgeA={edgeA}, edgeAIntervalMid={aMid}, edgeAIntervalInside={aIn}, edgeB={edgeB}, edgeBIntervalMid={bMid}, edgeBIntervalInside={bIn}");
+            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 60f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=true, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), edgeAIntervalMid={aMid}, edgeAIntervalInside={aIn}, edgeBIntervalMid={bMid}, edgeBIntervalInside={bIn}, Strip1 order=[a0,a1,b1,b0], areaUv={s1AreaUv:F6}, selfIntersect={s1Intersect}, insideRatio={s1InsideRatio:F3}, Strip2 order=[a0,a1,b0,b1], areaUv={s2AreaUv:F6}, selfIntersect={s2Intersect}, insideRatio={s2InsideRatio:F3}, selectedStripCandidate={selectedStripCandidate}");
             return true;
         }
 
+        if (discardStripPreferred)
+        {
+            stats.twoEdgeTwoCrossingsStripDiscardedCount++;
+            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 80f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), edgeAIntervalMid={aMid}, edgeAIntervalInside={aIn}, edgeBIntervalMid={bMid}, edgeBIntervalInside={bIn}, Strip1 order=[a0,a1,b1,b0], areaUv={s1AreaUv:F6}, selfIntersect={s1Intersect}, insideRatio={s1InsideRatio:F3}, Strip2 order=[a0,a1,b0,b1], areaUv={s2AreaUv:F6}, selfIntersect={s2Intersect}, insideRatio={s2InsideRatio:F3}, selectedStripCandidate={selectedStripCandidate}, fallbackReason=strip outside");
+            return false;
+        }
+
         stats.twoEdgeTwoCrossingsStripDiscardedCount++;
-        TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 80f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, edgeA={edgeA}, edgeAIntervalMid={aMid}, edgeAIntervalInside={aIn}, edgeB={edgeB}, edgeBIntervalMid={bMid}, edgeBIntervalInside={bIn}, fallbackReason=strip outside");
+        TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 80f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), edgeAIntervalMid={aMid}, edgeAIntervalInside={aIn}, edgeBIntervalMid={bMid}, edgeBIntervalInside={bIn}, Strip1 order=[a0,a1,b1,b0], areaUv={s1AreaUv:F6}, selfIntersect={s1Intersect}, insideRatio={s1InsideRatio:F3}, Strip2 order=[a0,a1,b0,b1], areaUv={s2AreaUv:F6}, selfIntersect={s2Intersect}, insideRatio={s2InsideRatio:F3}, selectedStripCandidate={selectedStripCandidate}, fallbackReason=two-edge interval mismatch");
         return false;
+    }
+
+    private static void EvaluateStripCandidate(List<int> poly, int i0, int i1, int i2, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, AlphaMaskProcessor.AlphaMaskData maskData, out bool valid, out float areaUv, out bool selfIntersect, out float insideRatio, out List<int> keptTriangles)
+    {
+        keptTriangles = new List<int>();
+        areaUv = Mathf.Abs(SignedArea(uv[poly[0]], uv[poly[1]], uv[poly[2]])) * 0.5f + Mathf.Abs(SignedArea(uv[poly[0]], uv[poly[2]], uv[poly[3]])) * 0.5f;
+        selfIntersect = SegmentsIntersect(uv[poly[0]], uv[poly[1]], uv[poly[2]], uv[poly[3]]) || SegmentsIntersect(uv[poly[1]], uv[poly[2]], uv[poly[3]], uv[poly[0]]);
+        if (selfIntersect || areaUv < trimmer.minTriangleUvArea)
+        {
+            valid = false; insideRatio = 0f; return;
+        }
+        var generated = new List<int>();
+        var dummy = new TrimStats();
+        TriangulateRegion(i0, i1, i2, poly, vertices, uv, trimmer, generated, ref dummy);
+        float sum = 0f; int n = 0;
+        for (int t = 0; t + 2 < generated.Count; t += 3)
+        {
+            if (TrySampleTriangleInsideRatio(maskData, uv[generated[t]], uv[generated[t + 1]], uv[generated[t + 2]], out float r))
+            {
+                sum += r; n++;
+                if (r >= 0.5f)
+                {
+                    keptTriangles.Add(generated[t]); keptTriangles.Add(generated[t + 1]); keptTriangles.Add(generated[t + 2]);
+                }
+            }
+        }
+        insideRatio = n > 0 ? sum / n : 0f;
+        valid = generated.Count >= 3;
     }
 
     private static void TryAddFourPointDebugCandidate(NDMFVRoidMeshTrimmer trimmer, List<FourPointDebugCandidate> list, string materialName, float suspicion, string block)
