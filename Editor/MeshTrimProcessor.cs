@@ -824,7 +824,10 @@ public static class MeshTrimProcessor
 
                 AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
                 AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
-                if (trimmer.enableBridgeCut && CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
+                var clippedOneInside = BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.33f, 2);
+                if (trimmer.enableBridgeCut &&
+                    IsBridgeCandidate(clippedOneInside, trimmer) &&
+                    CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
                     TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
                 {
                     bridgeStats.bridgeCutAppliedCount++;
@@ -872,7 +875,10 @@ public static class MeshTrimProcessor
 
                 AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
                 AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
-                if (trimmer.enableBridgeCut && CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
+                var clippedTwoInside = BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.66f, 2);
+                if (trimmer.enableBridgeCut &&
+                    IsBridgeCandidate(clippedTwoInside, trimmer) &&
+                    CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
                     TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
                 {
                     bridgeStats.bridgeCutAppliedCount++;
