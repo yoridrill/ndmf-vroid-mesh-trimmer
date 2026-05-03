@@ -1040,7 +1040,9 @@ public static class MeshTrimProcessor
             }
             bool hasTwoCutEdges = cutCount >= 2;
             if (hasTwoCutEdges) bridgeStats.trianglesWithTwoCutEdges++;
-            bool hasNeighborCutContinuityIssue = trimmer.bridgeUseNeighborKeptSide && hasTwoCutEdges;
+            bool hasNeighborCutContinuityIssue = trimmer.bridgeUseNeighborKeptSide &&
+                                                 hasTwoCutEdges &&
+                                                 r.state == TriangleTrimState.Clipped;
             if (ambiguous || smallKept || smallRemoved || hasNeighborCutContinuityIssue) bridgeStats.bridgeCandidatesCount++;
             if (ambiguous) bridgeStats.ambiguousBridgeCandidates++;
             if (smallKept) bridgeStats.smallKeptAreaBridgeCandidates++;
