@@ -5,6 +5,11 @@ using UnityEngine.Rendering;
 
 public static class MeshTrimProcessor
 {
+    private class FourPointDebugCandidate
+    {
+        public float suspicion;
+        public string logBlock;
+    }
     public struct VertexSource
     {
         public int index0; public float weight0;
@@ -278,6 +283,8 @@ public static class MeshTrimProcessor
             }
             swPre.Stop();
 
+            string materialName = (renderer.sharedMaterials != null && sub < renderer.sharedMaterials.Length && renderer.sharedMaterials[sub] != null) ? renderer.sharedMaterials[sub].name : "(null)";
+            string textureName = task.texture != null ? task.texture.name : "(null)";
             TrimStats stats = ProcessSubMesh(
                 workingIndices,
                 task.maskData,
@@ -299,7 +306,11 @@ public static class MeshTrimProcessor
                 hasColors,
                 hasBoneWeights,
                 vertexSources,
-                newSubMeshIndices[sub]);
+                newSubMeshIndices[sub],
+                renderer.name,
+                sub,
+                materialName,
+                textureName);
 
             stats.addedVertices = vertices.Count - baseVertexCount;
             baseVertexCount = vertices.Count;
@@ -572,8 +583,13 @@ public static class MeshTrimProcessor
         bool hasColors,
         bool hasBoneWeights,
         List<VertexSource> vertexSources,
-        List<int> dstIndices)
+        List<int> dstIndices,
+        string rendererName,
+        int subMeshIndex,
+        string materialName,
+        string textureName)
     {
+        var debugCandidates = new List<FourPointDebugCandidate>();
         TrimStats stats = new TrimStats();
         var triangleResults = new List<TriangleTrimResult>(srcIndices.Length / 3);
         var edgeCuts = new List<EdgeCutInfo>();
@@ -701,7 +717,7 @@ public static class MeshTrimProcessor
 
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
 
-            if (boundaryPointsDetected == 4 && TryProcessFourBoundaryTriangle(i0, i1, i2, boundaryPoints, maskData, trimmer, vertices, uv, dstIndices, ref stats))
+            if (boundaryPointsDetected == 4 && TryProcessFourBoundaryTriangle(i0, i1, i2, triIndex, boundaryPoints, maskData, trimmer, vertices, uv, dstIndices, ref stats, debugCandidates, rendererName, subMeshIndex, materialName, textureName))
             {
                 triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
                 continue;
@@ -1095,6 +1111,13 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Four-plus-boundary fallback summary: four-plus-boundary fallback count={stats.fourPlusBoundaryFallbackCount}, four-plus-boundary keep count={stats.fourPlusBoundaryKeepCount}, four-plus-boundary delete count={stats.fourPlusBoundaryDeleteCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, four-point clip generated zero fallback count={stats.fourPointClipGeneratedZeroFallbackCount}, four-point generated triangle inside count={stats.fourPointGeneratedTriangleInsideCount}, four-point generated triangle outside count={stats.fourPointGeneratedTriangleOutsideCount}, four-point reversed-side suspected count={stats.fourPointReversedSideSuspectedCount}, four-point fallback due to invalid sample count={stats.fourPointFallbackDueToInvalidSampleCount}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point pairing summary: four-point pairing candidates tested count={stats.fourPointPairingCandidatesTestedCount}, four-point pairing A selected count={stats.fourPointPairingASelectedCount}, four-point pairing B selected count={stats.fourPointPairingBSelectedCount}, four-point pairing C selected count={stats.fourPointPairingCSelectedCount}, four-point pairing rejected by intersection count={stats.fourPointPairingRejectedByIntersectionCount}, four-point pairing rejected by degenerate count={stats.fourPointPairingRejectedByDegenerateCount}, four-point pairing fallback count={stats.fourPointPairingFallbackCount}, four-point best score={stats.fourPointBestScore}, four-point generated triangles count={stats.fourPointGeneratedTrianglesCount}, four-point kept triangles count={stats.fourPointKeptTrianglesCount}, four-point discarded triangles count={stats.fourPointDiscardedTrianglesCount}");
+        if (trimmer != null && trimmer.debugFourPointClipDetails && debugCandidates.Count > 0)
+        {
+            debugCandidates.Sort((a, b) => b.suspicion.CompareTo(a.suspicion));
+            int maxCount = Mathf.Max(0, trimmer.debugFourPointClipMaxTriangles);
+            int emit = Mathf.Min(maxCount, debugCandidates.Count);
+            for (int i = 0; i < emit; i++) Debug.Log(debugCandidates[i].logBlock);
+        }
         return stats;
     }
 
@@ -1794,8 +1817,8 @@ public static class MeshTrimProcessor
 
 
     private static bool TryProcessFourBoundaryTriangle(
-        int i0, int i1, int i2, List<BoundaryPoint> boundaryPoints, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer,
-        List<Vector3> vertices, List<Vector2> uv, List<int> dstIndices, ref TrimStats stats)
+        int i0, int i1, int i2, int triangleIndex, List<BoundaryPoint> boundaryPoints, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices, List<Vector2> uv, List<int> dstIndices, ref TrimStats stats, List<FourPointDebugCandidate> debugCandidates, string rendererName, int subMeshIndex, string materialName, string textureName)
     {
         if (boundaryPoints == null || boundaryPoints.Count != 4) return false;
         boundaryPoints.Sort((a, b) => a.perimeterOrder.CompareTo(b.perimeterOrder));
@@ -1894,6 +1917,7 @@ public static class MeshTrimProcessor
         {
             stats.fourPointPairingFallbackCount++;
             stats.fourPointClipGeneratedZeroFallbackCount++;
+            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 220f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Texture={textureName}, fallbackUsed=true, fallbackReason=no valid pairing, bestScore=-inf");
             return false;
         }
         if (bestPairingIndex == 0) stats.fourPointPairingASelectedCount++;
@@ -1910,7 +1934,25 @@ public static class MeshTrimProcessor
         stats.fourPointGeneratedTrianglesCount += generated;
         stats.fourPointClipSuccessCount++;
         stats.fourPointClipGeneratedTriangles += generated;
+        string pairingName = bestPairingIndex == 0 ? "A" : (bestPairingIndex == 1 ? "B" : "C");
+        float suspicion = (pairingName != "A" ? 20f : 0f) + (bestOutside == 0 ? 30f : 0f) + (bestInside == 0 ? 50f : 0f) + ((bestScore < 0.05f) ? 20f : 0f);
+        string bp = "";
+        for (int bi = 0; bi < boundaryPoints.Count; bi++)
+        {
+            var p = boundaryPoints[bi];
+            bp += $" p{bi}:(edge={p.edgeIndex}, t={p.localTOnEdge:F4}, po={p.perimeterOrder:F4}, uv={p.uv}, vi={p.vertexIndex}, in={AlphaMaskProcessor.SampleMask(maskData, p.uv)}, key={p.crossing.edgeKey}, tc={p.crossing.tCanonical:F4})";
+        }
+        TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, suspicion,
+            $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Texture={textureName}, selectedPairing={pairingName}, fallbackUsed=false, bestScore={bestScore:F6}, keptTriangles={bestInside}, discardedTriangles={bestOutside}, generatedTriangles={generated}.{bp}");
         return true;
+    }
+
+    private static void TryAddFourPointDebugCandidate(NDMFVRoidMeshTrimmer trimmer, List<FourPointDebugCandidate> list, string materialName, float suspicion, string block)
+    {
+        if (trimmer == null || !trimmer.debugFourPointClipDetails || list == null) return;
+        string filter = trimmer.debugFourPointMaterialFilter ?? "";
+        if (!string.IsNullOrEmpty(filter) && (materialName == null || materialName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)) return;
+        list.Add(new FourPointDebugCandidate { suspicion = suspicion, logBlock = block });
     }
 
     private static bool TrySampleTriangleInsideRatio(AlphaMaskProcessor.AlphaMaskData maskData, Vector2 uv0, Vector2 uv1, Vector2 uv2, out float insideRatio)
