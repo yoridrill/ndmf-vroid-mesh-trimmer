@@ -976,6 +976,8 @@ public static class MeshTrimProcessor
             if (cutPointsByTri.TryGetValue(r.triangleIndex, out var cps))
             {
                 r.cutPoints = cps.ToArray();
+                r.keptRegionContactEdges = cps.Count;
+                r.removedRegionContactEdges = cps.Count;
                 if (cps.Count >= 2 && triBase >= 0 && triBase + 2 < srcIndices.Length)
                 {
                     int ti0 = srcIndices[triBase];
@@ -987,6 +989,11 @@ public static class MeshTrimProcessor
                     r.keptRegionCentroidUv = (uv[ti0] + cp0 + cp1) / 3f;
                     r.removedRegionCentroidUv = (uv[ti1] + uv[ti2] + cp0 + cp1) * 0.25f;
                 }
+            }
+            else
+            {
+                r.keptRegionContactEdges = 0;
+                r.removedRegionContactEdges = 0;
             }
             if (r.state == TriangleTrimState.StrongTrim) r.generatedTriangles = 0;
             else if (r.state == TriangleTrimState.StrongKeep) r.generatedTriangles = 1;
