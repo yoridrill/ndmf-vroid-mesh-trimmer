@@ -237,14 +237,9 @@ public static class MeshTrimProcessor
             var swPre = System.Diagnostics.Stopwatch.StartNew();
             if (task.enablePreSubdivide && task.preSubdivideLevel > 0)
             {
-                if (task.preSubdivideQuadAware)
-                {
-                    workingIndices = PreSubdivideIndicesQuadAware(srcIndices, task.preSubdivideLevel, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref preAddedVertices, out quadCandidates, out acceptedQuads, out rejectedQuads, out triFallback);
-                }
-                else
-                {
-                    workingIndices = PreSubdivideIndices(srcIndices, task.preSubdivideLevel, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref preAddedVertices);
-                }
+                // Always use midpoint triangle subdivision.
+                // Quad-aware pre-subdivide is intentionally disabled due shape drift on non-planar quads.
+                workingIndices = PreSubdivideIndices(srcIndices, task.preSubdivideLevel, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref preAddedVertices);
             }
             swPre.Stop();
 
