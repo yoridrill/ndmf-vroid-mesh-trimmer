@@ -63,6 +63,16 @@ public static class MeshTrimProcessor
         public int generatedTriangles;
     }
 
+    private struct BoundaryPoint
+    {
+        public int edgeIndex;
+        public float localTOnEdge;
+        public EdgeCrossing crossing;
+        public int vertexIndex;
+        public Vector2 uv;
+        public float perimeterOrder;
+    }
+
     private struct EdgeCutInfo
     {
         public long edgeKey;
@@ -537,6 +547,13 @@ public static class MeshTrimProcessor
         var triangleResults = new List<TriangleTrimResult>(srcIndices.Length / 3);
         var edgeCuts = new List<EdgeCutInfo>();
         EdgeCrossingCache cache = new EdgeCrossingCache();
+        int trianglesWith0BoundaryPoints = 0;
+        int trianglesWith1BoundaryPoint = 0;
+        int trianglesWith2BoundaryPoints = 0;
+        int trianglesWith3BoundaryPoints = 0;
+        int trianglesWith4BoundaryPoints = 0;
+        int trianglesWith5OrMoreBoundaryPoints = 0;
+        int maxBoundaryPointsOnTriangle = 0;
 
         // Prepass: generate and record all direct edge intersections first.
         for (int i = 0; i < srcIndices.Length; i += 3)
@@ -624,13 +641,19 @@ public static class MeshTrimProcessor
             bool m12In = AlphaMaskProcessor.SampleMask(maskData, m12);
             bool m20In = AlphaMaskProcessor.SampleMask(maskData, m20);
             bool centroidIn = AlphaMaskProcessor.SampleMask(maskData, centroid);
-            int boundaryPointsDetected =
-                GetCrossingsForTriangleEdge(i0, i1, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats).Count +
-                GetCrossingsForTriangleEdge(i1, i2, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats).Count +
-                GetCrossingsForTriangleEdge(i2, i0, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats).Count;
+            var boundaryPoints = CollectBoundaryPointsForTriangle(i0, i1, i2, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+            int boundaryPointsDetected = boundaryPoints.Count;
+            if (boundaryPointsDetected == 0) trianglesWith0BoundaryPoints++;
+            else if (boundaryPointsDetected == 1) trianglesWith1BoundaryPoint++;
+            else if (boundaryPointsDetected == 2) trianglesWith2BoundaryPoints++;
+            else if (boundaryPointsDetected == 3) trianglesWith3BoundaryPoints++;
+            else if (boundaryPointsDetected == 4) trianglesWith4BoundaryPoints++;
+            else trianglesWith5OrMoreBoundaryPoints++;
+            if (boundaryPointsDetected > maxBoundaryPointsOnTriangle)
+            {
+                maxBoundaryPointsOnTriangle = boundaryPointsDetected;
+            }
             if (boundaryPointsDetected >= 4)
             {
                 stats.trianglesWithFourOrMoreBoundaryPoints++;
@@ -937,7 +960,89 @@ public static class MeshTrimProcessor
         }
 
         Debug.Log($"[NDMF VRoid Mesh Trimmer] EdgeCrossingCache created count={cache.CreatedCount}, hit count={cache.HitCount}, shared edge crossings reused count={cache.ReusedCount}, edges with 0 crossings={edgesWith0Crossings}, edges with 1 crossing={edgesWith1Crossing}, edges with 2 crossings={edgesWith2Crossings}, max crossings on edge={maxCrossingsOnEdge}, triangles with 4+ boundary points detected={stats.trianglesWithFourOrMoreBoundaryPoints}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Triangle boundary points summary: triangles with 0 boundary points={trianglesWith0BoundaryPoints}, triangles with 1 boundary point={trianglesWith1BoundaryPoint}, triangles with 2 boundary points={trianglesWith2BoundaryPoints}, triangles with 3 boundary points={trianglesWith3BoundaryPoints}, triangles with 4 boundary points={trianglesWith4BoundaryPoints}, triangles with 5+ boundary points={trianglesWith5OrMoreBoundaryPoints}, max boundary points on triangle={maxBoundaryPointsOnTriangle}");
         return stats;
+    }
+
+    private static List<BoundaryPoint> CollectBoundaryPointsForTriangle(
+        int i0,
+        int i1,
+        int i2,
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Vector2> uv,
+        List<Vector2> uv2,
+        List<Vector2> uv3,
+        List<Vector2> uv4,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasUv2,
+        bool hasUv3,
+        bool hasUv4,
+        bool hasColors,
+        bool hasBoneWeights,
+        List<VertexSource> vertexSources,
+        EdgeCrossingCache cache,
+        ref TrimStats stats)
+    {
+        var boundaryPoints = new List<BoundaryPoint>();
+        AddBoundaryPointsForEdge(boundaryPoints, 0, i0, i1, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+        AddBoundaryPointsForEdge(boundaryPoints, 1, i1, i2, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+        AddBoundaryPointsForEdge(boundaryPoints, 2, i2, i0, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+        boundaryPoints.Sort((x, y) => x.perimeterOrder.CompareTo(y.perimeterOrder));
+        return boundaryPoints;
+    }
+
+    private static void AddBoundaryPointsForEdge(
+        List<BoundaryPoint> boundaryPoints,
+        int edgeIndex,
+        int edgeA,
+        int edgeB,
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Vector2> uv,
+        List<Vector2> uv2,
+        List<Vector2> uv3,
+        List<Vector2> uv4,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasUv2,
+        bool hasUv3,
+        bool hasUv4,
+        bool hasColors,
+        bool hasBoneWeights,
+        List<VertexSource> vertexSources,
+        EdgeCrossingCache cache,
+        ref TrimStats stats)
+    {
+        var orderedCrossings = GetCrossingsForTriangleEdge(edgeA, edgeB, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+        var edgeKey = new EdgeKey(edgeA, edgeB);
+        bool localMatchesCanonical = edgeA == edgeKey.a;
+
+        foreach (var crossing in orderedCrossings)
+        {
+            float localTOnEdge = localMatchesCanonical ? crossing.tCanonical : 1f - crossing.tCanonical;
+            boundaryPoints.Add(new BoundaryPoint
+            {
+                edgeIndex = edgeIndex,
+                localTOnEdge = localTOnEdge,
+                crossing = crossing,
+                vertexIndex = crossing.vertexIndex,
+                uv = crossing.uv,
+                perimeterOrder = edgeIndex + localTOnEdge
+            });
+        }
     }
 
 
