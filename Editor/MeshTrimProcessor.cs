@@ -1102,65 +1102,13 @@ public static class MeshTrimProcessor
         bool keepSharedCorner;
         if (trimmer.bridgeUseNeighborKeptSide)
         {
-            Vector2 sharedCentroid = (uv[shared] + uv[cutA] + uv[cutB]) / 3f;
-            Vector2 oppositeCentroid = (uv[other1] + uv[other2] + uv[cutA] + uv[cutB]) * 0.25f;
-
-            float sharedNeighborScore = 0f;
-            float oppositeNeighborScore = 0f;
-
-            sharedNeighborScore += 1f / (Vector2.Distance(sharedCentroid, sideA.keptSideCentroidUv) + 1e-5f);
-            sharedNeighborScore += 1f / (Vector2.Distance(sharedCentroid, sideB.keptSideCentroidUv) + 1e-5f);
-            oppositeNeighborScore += 1f / (Vector2.Distance(oppositeCentroid, sideA.keptSideCentroidUv) + 1e-5f);
-            oppositeNeighborScore += 1f / (Vector2.Distance(oppositeCentroid, sideB.keptSideCentroidUv) + 1e-5f);
-
-            // Contact-edge continuity bonus: prefer candidate side that aligns with neighbor kept-side edge endpoint.
-            bool sharedMatchesA = (sideA.keptSideUsesEdgeA && shared == sideA.edgeA) || (!sideA.keptSideUsesEdgeA && shared == sideA.edgeB);
-            bool sharedMatchesB = (sideB.keptSideUsesEdgeA && shared == sideB.edgeA) || (!sideB.keptSideUsesEdgeA && shared == sideB.edgeB);
-            if (sharedMatchesA) sharedNeighborScore += 0.5f; else oppositeNeighborScore += 0.5f;
-            if (sharedMatchesB) sharedNeighborScore += 0.5f; else oppositeNeighborScore += 0.5f;
-
-            if (Mathf.Abs(sharedNeighborScore - oppositeNeighborScore) < 1e-4f)
-            {
-                // Tie: fallback to mask sampling ratio at representative points.
-                int sharedInsideVotes = 0;
-                if (AlphaMaskProcessor.SampleMask(maskData, sharedCentroid)) sharedInsideVotes++;
-                if (AlphaMaskProcessor.SampleMask(maskData, uv[shared])) sharedInsideVotes++;
-                int oppositeInsideVotes = 0;
-                if (AlphaMaskProcessor.SampleMask(maskData, oppositeCentroid)) oppositeInsideVotes++;
-                if (AlphaMaskProcessor.SampleMask(maskData, (uv[other1] + uv[other2]) * 0.5f)) oppositeInsideVotes++;
-                if (sharedInsideVotes == oppositeInsideVotes)
-                {
-                    // Next priority: prefer side containing original inside samples.
-                    bool sharedContainsInside = AlphaMaskProcessor.SampleMask(maskData, uv[shared]);
-                    bool oppositeContainsInside = AlphaMaskProcessor.SampleMask(maskData, uv[other1]) ||
-                                                  AlphaMaskProcessor.SampleMask(maskData, uv[other2]);
-                    if (sharedContainsInside != oppositeContainsInside)
-                    {
-                        keepSharedCorner = sharedContainsInside;
-                        decidedByNeighbor = false;
-                    }
-                    else
-                    {
-                        // Final fallback: larger stable area.
-                        float sharedArea = Mathf.Abs(SignedArea(uv[shared], uv[cutA], uv[cutB])) * 0.5f;
-                        float totalArea = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f;
-                        float oppositeArea = Mathf.Max(0f, totalArea - sharedArea);
-                        keepSharedCorner = sharedArea >= oppositeArea;
-                        decidedByNeighbor = false;
-            decidedByNeighbor = false;
-                    }
-                }
-                else
-                {
-                    keepSharedCorner = sharedInsideVotes > oppositeInsideVotes;
-                decidedByNeighbor = false;
-                }
-            }
-            else
-            {
-                keepSharedCorner = sharedNeighborScore > oppositeNeighborScore;
-                decidedByNeighbor = true;
-            }
+            // Enforce continuity-first: choose side by adjacent kept-edge ownership only.
+            bool sharedMatchesA = (sideA.keptSideUsesEdgeA && shared == sideA.edgeB) || (!sideA.keptSideUsesEdgeA && shared == sideA.edgeA);
+            bool sharedMatchesB = (sideB.keptSideUsesEdgeA && shared == sideB.edgeB) || (!sideB.keptSideUsesEdgeA && shared == sideB.edgeA);
+            int sharedScore = (sharedMatchesA ? 1 : 0) + (sharedMatchesB ? 1 : 0);
+            int oppositeScore = 2 - sharedScore;
+            keepSharedCorner = sharedScore >= oppositeScore;
+            decidedByNeighbor = true;
         }
         else
         {
