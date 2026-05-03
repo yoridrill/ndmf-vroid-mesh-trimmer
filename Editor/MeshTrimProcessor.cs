@@ -155,6 +155,10 @@ public static class MeshTrimProcessor
 
         Dictionary<Texture2D, AlphaMaskProcessor.AlphaMaskData> maskCache = new Dictionary<Texture2D, AlphaMaskProcessor.AlphaMaskData>();
         Dictionary<SkinnedMeshRenderer, Dictionary<int, SubMeshTask>> tasksByRenderer = new Dictionary<SkinnedMeshRenderer, Dictionary<int, SubMeshTask>>();
+        if (trimmer.debugFourPointClipDetails)
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] Debug enabled. MaxTriangles={trimmer.debugFourPointClipMaxTriangles}, MaterialFilter={trimmer.debugFourPointMaterialFilter}");
+        }
         int preSubdivideEnabledTargetCount = 0;
         int quadAwareEnabledTargetCount = 0;
 
@@ -202,6 +206,11 @@ public static class MeshTrimProcessor
                 existingTask.preSubdivideLevel = Mathf.Max(existingTask.preSubdivideLevel, target.preSubdivideLevel);
                 existingTask.preSubdivideQuadAware = existingTask.preSubdivideQuadAware || target.preSubdivideQuadAware;
             }
+        }
+
+        if (trimmer.debugFourPointClipDetails && tasksByRenderer.Count == 0)
+        {
+            Debug.Log("[NDMF VRoid Mesh Trimmer][4pt-debug] No trim tasks were built. Check target/usages/active renderer/material bindings.");
         }
 
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Trim task renderers={tasksByRenderer.Count}, PreSubdivideEnabledTargetCount={preSubdivideEnabledTargetCount}, QuadAwareEnabledTargetCount={quadAwareEnabledTargetCount}");
