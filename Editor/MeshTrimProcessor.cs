@@ -825,10 +825,7 @@ public static class MeshTrimProcessor
                     CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
                     TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
                 {
-                    bridgeStats.bridgeCutAppliedCount++;
-                    bridgeStats.replacedClippedResultCount++;
-                    if (decidedByNeighbor) bridgeStats.keptSideDecidedByNeighborCount++;
-                    else bridgeStats.keptSideDecidedByMaskCount++;
+                    RecordBridgeApplied(ref bridgeStats, decidedByNeighbor);
                     triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
                     continue;
                 }
@@ -876,10 +873,7 @@ public static class MeshTrimProcessor
                     CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
                     TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
                 {
-                    bridgeStats.bridgeCutAppliedCount++;
-                    bridgeStats.replacedClippedResultCount++;
-                    if (decidedByNeighbor) bridgeStats.keptSideDecidedByNeighborCount++;
-                    else bridgeStats.keptSideDecidedByMaskCount++;
+                    RecordBridgeApplied(ref bridgeStats, decidedByNeighbor);
                     triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
                     continue;
                 }
@@ -920,10 +914,7 @@ public static class MeshTrimProcessor
                 pass2AttemptCount++;
                 if (TryBridgeCutAmbiguousTriangle(r.triangleIndex, ti0, ti1, ti2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
                 {
-                    bridgeStats.bridgeCutAppliedCount++;
-                    bridgeStats.replacedClippedResultCount++;
-                    if (decidedByNeighbor) bridgeStats.keptSideDecidedByNeighborCount++;
-                    else bridgeStats.keptSideDecidedByMaskCount++;
+                    RecordBridgeApplied(ref bridgeStats, decidedByNeighbor);
 
                     // Reflect pass2 recovery in recorded per-triangle result so downstream stats are consistent.
                     r.state = TriangleTrimState.Clipped;
@@ -1055,6 +1046,15 @@ public static class MeshTrimProcessor
         }
         Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}, BridgeCandidatesCount={bridgeStats.bridgeCandidatesCount}, AmbiguousBridgeCandidates={bridgeStats.ambiguousBridgeCandidates}, SmallKeptAreaBridgeCandidates={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemovedAreaBridgeCandidates={bridgeStats.smallRemovedAreaBridgeCandidates}, ContinuityIssueBridgeCandidates={bridgeStats.continuityIssueBridgeCandidates}, TrianglesWithTwoCutEdges={bridgeStats.trianglesWithTwoCutEdges}, BridgeCutAppliedCount={bridgeStats.bridgeCutAppliedCount}, Pass2AppliedCount={pass2AppliedTotal}, BridgeCutRejectedCount={bridgeStats.bridgeCutRejectedCount}, ReplacedClippedResultCount={bridgeStats.replacedClippedResultCount}, KeptSideDecidedByNeighborCount={bridgeStats.keptSideDecidedByNeighborCount}, KeptSideDecidedByMaskCount={bridgeStats.keptSideDecidedByMaskCount}");
         return stats;
+    }
+
+
+    private static void RecordBridgeApplied(ref BridgeStats bridgeStats, bool decidedByNeighbor)
+    {
+        bridgeStats.bridgeCutAppliedCount++;
+        bridgeStats.replacedClippedResultCount++;
+        if (decidedByNeighbor) bridgeStats.keptSideDecidedByNeighborCount++;
+        else bridgeStats.keptSideDecidedByMaskCount++;
     }
 
     private static bool IsBridgeCandidate(TriangleTrimResult r, NDMFVRoidMeshTrimmer trimmer)
