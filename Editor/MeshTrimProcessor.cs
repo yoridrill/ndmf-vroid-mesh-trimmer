@@ -1940,7 +1940,9 @@ public static class MeshTrimProcessor
         for (int bi = 0; bi < boundaryPoints.Count; bi++)
         {
             var p = boundaryPoints[bi];
-            bp += $" p{bi}:(edge={p.edgeIndex}, t={p.localTOnEdge:F4}, po={p.perimeterOrder:F4}, uv={p.uv}, vi={p.vertexIndex}, in={AlphaMaskProcessor.SampleMask(maskData, p.uv)}, key={p.crossing.edgeKey}, tc={p.crossing.tCanonical:F4})";
+            int edgeA = (p.edgeIndex == 0) ? i0 : (p.edgeIndex == 1 ? i1 : i2);
+            int edgeB = (p.edgeIndex == 0) ? i1 : (p.edgeIndex == 1 ? i2 : i0);
+            bp += $" p{bi}:(edge={p.edgeIndex}, t={p.localTOnEdge:F4}, po={p.perimeterOrder:F4}, uv={p.uv}, vi={p.vertexIndex}, in={AlphaMaskProcessor.SampleMask(maskData, p.uv)}, edgeKey=({Math.Min(edgeA, edgeB)},{Math.Max(edgeA, edgeB)}), tc={p.crossing.tCanonical:F4})";
         }
         TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, suspicion,
             $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Texture={textureName}, selectedPairing={pairingName}, fallbackUsed=false, bestScore={bestScore:F6}, keptTriangles={bestInside}, discardedTriangles={bestOutside}, generatedTriangles={generated}.{bp}");
