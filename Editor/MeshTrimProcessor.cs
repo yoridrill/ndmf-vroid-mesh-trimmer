@@ -1001,6 +1001,24 @@ public static class MeshTrimProcessor
             triangleResults[i] = r;
         }
 
+        // Backfill edge kept/removed side centroids from triangle metadata for continuity scoring/diagnostics.
+        var triByIndex = new Dictionary<int, TriangleTrimResult>(triangleResults.Count);
+        for (int i = 0; i < triangleResults.Count; i++)
+        {
+            triByIndex[triangleResults[i].triangleIndex] = triangleResults[i];
+        }
+        for (int i = 0; i < edgeCuts.Count; i++)
+        {
+            var e = edgeCuts[i];
+            if (!triByIndex.TryGetValue(e.triangleIndex, out var tr)) continue;
+            e.keptSideCentroidUv = tr.keptRegionCentroidUv;
+            e.removedSideCentroidUv = tr.removedRegionCentroidUv;
+            float da = Vector2.Distance(uv[e.edgeA], tr.keptRegionCentroidUv);
+            float db = Vector2.Distance(uv[e.edgeB], tr.keptRegionCentroidUv);
+            e.keptSideUsesEdgeA = da <= db;
+            edgeCuts[i] = e;
+        }
+
         stats.outputTriangles = dstIndices.Count / 3;
         bridgeStats.totalTriangles = srcIndices.Length / 3;
         if (trimmer.enableBridgeCut)
