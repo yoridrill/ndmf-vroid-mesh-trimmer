@@ -20,6 +20,10 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         public SkinnedMeshRenderer renderer;
         public Mesh originalSharedMesh;
         public Material[] originalSharedMaterials;
+        public bool originalEnabled;
+        public bool originalForceRenderingOff;
+        public GameObject previewObject;
+        public SkinnedMeshRenderer previewRenderer;
         public Mesh previewMesh;
         public Material[] previewMaterials;
     }
@@ -79,6 +83,13 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         DrawSetting("maskClosePixels");
         DrawSetting("fillSmallHolesPixels");
         DrawSetting("removeSmallIslandsPixels");
+        EditorGUILayout.Space();
+        EditorGUILayout.LabelField("Bridge Cut", EditorStyles.boldLabel);
+        DrawSetting("enableBridgeCut");
+        DrawSetting("bridgeSmallKeptAreaRatio");
+        DrawSetting("bridgeSmallRemovedAreaRatio");
+        DrawSetting("bridgeUseNeighborKeptSide");
+        bool oldPadding = trimmer.enableTexturePadding;
         EditorGUILayout.PropertyField(serializedObject.FindProperty("enableTexturePadding"), new GUIContent(T("テクスチャの余白を塗り足す", "Pad Texture Transparent Areas")));
 
         if (EditorGUI.EndChangeCheck())
@@ -86,9 +97,14 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             QueuePreviewUpdate(state, PreviewUpdateType.MeshOnly);
         }
 
+        if (oldPadding != trimmer.enableTexturePadding)
+        {
+            QueuePreviewUpdate(state, PreviewUpdateType.TextureOnly);
+        }
+
+        EnsureAutoDetectedTargets(trimmer, false);
         if (trimmer.enableTexturePadding)
         {
-            EnsureAutoDetectedTargets(trimmer, false);
             DrawTargets(serializedObject.FindProperty("targets"), state);
         }
 
@@ -246,6 +262,10 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             case "maskClosePixels": return T("細い隙間を無視 (px)", "Ignore Thin Gaps (px)");
             case "fillSmallHolesPixels": return T("透明穴下限サイズ (px)", "Min Transparent Hole Size (px)");
             case "removeSmallIslandsPixels": return T("ゴミ判定サイズ (px)", "Noise Threshold Size (px)");
+            case "enableBridgeCut": return T("Bridge Cutを有効化", "Enable Bridge Cut");
+            case "bridgeSmallKeptAreaRatio": return T("Bridge: 小さい残存面積比", "Bridge: Small Kept Area Ratio");
+            case "bridgeSmallRemovedAreaRatio": return T("Bridge: 小さい削除面積比", "Bridge: Small Removed Area Ratio");
+            case "bridgeUseNeighborKeptSide": return T("Bridge: 隣接keep側を優先", "Bridge: Prefer Neighbor Kept Side");
             case "minIntersectionT": return T("最小交点t", "Min Intersection t");
             case "maxIntersectionT": return T("最大交点t", "Max Intersection t");
             case "minTriangleUvArea": return T("最小UV三角形面積", "Min Triangle UV Area");
@@ -276,7 +296,17 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             EditorGUILayout.BeginHorizontal();
 
             var previewRect = GUILayoutUtility.GetRect(previewSize, previewSize, GUILayout.Width(previewSize), GUILayout.Height(previewSize));
-            if (tex != null) EditorGUI.DrawPreviewTexture(previewRect, tex, null, ScaleMode.ScaleToFit);
+            if (tex != null)
+            {
+                bool hovered = previewRect.Contains(Event.current.mousePosition);
+                EditorGUI.DrawPreviewTexture(previewRect, tex, null, ScaleMode.ScaleToFit);
+                EditorGUIUtility.AddCursorRect(previewRect, MouseCursor.Link);
+                if (hovered && Event.current.type == EventType.MouseDown && Event.current.button == 0)
+                {
+                    PopupWindow.Show(previewRect, new UvPickerPopup(tex));
+                    Event.current.Use();
+                }
+            }
             else EditorGUI.HelpBox(previewRect, "No Tex", MessageType.None);
 
             EditorGUILayout.BeginVertical();
@@ -287,6 +317,8 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             EditorGUI.LabelField(materialRect, new GUIContent(materialNames, materialNames));
             EditorGUILayout.EndHorizontal();
 
+            using (new EditorGUI.DisabledScope(!((NDMFVRoidMeshTrimmer)target).enableTexturePadding))
+            {
             EditorGUI.BeginChangeCheck();
             var mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)modeProp.enumValueIndex;
             EditorGUILayout.BeginHorizontal();
@@ -305,8 +337,10 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
                 mode = (NDMFVRoidMeshTrimmer.TexturePostProcessMode)EditorGUI.EnumPopup(controlsRect, mode);
             }
             EditorGUILayout.EndHorizontal();
+
             modeProp.enumValueIndex = (int)mode;
             if (EditorGUI.EndChangeCheck()) QueuePreviewUpdate(state, PreviewUpdateType.TextureOnly);
+            }
 
             EditorGUILayout.EndVertical();
             EditorGUILayout.EndHorizontal();
@@ -417,6 +451,13 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             EditorUtility.SetDirty(trimmer);
             state.failed = false;
         }
+        catch (Exception ex)
+        {
+            Debug.LogError($"[NDMF VRoid Mesh Trimmer][Preview] Failed and restoring originals. {ex}");
+            RestoreOriginalsFromRecovery(trimmer);
+            state.active = false;
+            state.failed = true;
+        }
         finally
         {
             state.processing = false;
@@ -430,15 +471,53 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         {
             var r = kv.Value;
             if (r.renderer == null || r.originalSharedMesh == null) continue;
-            r.renderer.sharedMesh = r.originalSharedMesh;
+            EnsurePreviewRenderer(r);
+
+            if (r.previewMesh != null && r.previewMesh != r.originalSharedMesh)
+            {
+                UnityEngine.Object.DestroyImmediate(r.previewMesh);
+                r.previewMesh = null;
+            }
+
+            // Never operate on the original model mesh instance during preview.
+            // Prepare a disposable working copy, then let the trim processor build preview output from it.
+            var working = UnityEngine.Object.Instantiate(r.originalSharedMesh);
+            working.name = r.originalSharedMesh.name + " (NDMF VRoid Mesh Trimmer Working)";
+            working.hideFlags = HideFlags.HideAndDontSave;
+            r.previewRenderer.sharedMesh = working;
+            r.previewRenderer.sharedMaterials = r.originalSharedMaterials;
+            r.renderer.enabled = false;
+            r.renderer.forceRenderingOff = true;
         }
 
-        MeshTrimProcessor.ApplyTrim(trimmer, false);
+        var usageRestore = new List<(NDMFVRoidMeshTrimmer.RendererSubMeshRef usage, SkinnedMeshRenderer original)>();
+        try
+        {
+            foreach (var target in trimmer.targets)
+            {
+                foreach (var usage in target.usages)
+                {
+                    if (usage == null || usage.renderer == null) continue;
+                    if (!state.rendererStates.TryGetValue(usage.renderer, out var rp) || rp.previewRenderer == null) continue;
+                    usageRestore.Add((usage, usage.renderer));
+                    usage.renderer = rp.previewRenderer;
+                }
+            }
+
+            MeshTrimProcessor.ApplyTrim(trimmer, false);
+        }
+        finally
+        {
+            foreach (var pair in usageRestore)
+            {
+                pair.usage.renderer = pair.original;
+            }
+        }
         foreach (var kv in state.rendererStates)
         {
             var r = kv.Value;
-            if (r.renderer == null) continue;
-            r.previewMesh = r.renderer.sharedMesh;
+            if (r.previewRenderer == null) continue;
+            r.previewMesh = r.previewRenderer.sharedMesh;
             if (r.previewMesh == null) continue;
 
             r.previewMesh.name = r.originalSharedMesh.name + " (NDMF VRoid Mesh Trimmer Preview)";
@@ -448,6 +527,37 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         }
 
         return meshCount;
+    }
+
+    private static void EnsurePreviewRenderer(RendererPreviewState r)
+    {
+        if (r.previewRenderer != null) return;
+        if (r.renderer == null) return;
+
+        var src = r.renderer;
+        var go = new GameObject(src.gameObject.name + " (NDMF Preview)");
+        go.hideFlags = HideFlags.HideAndDontSave;
+        go.transform.SetParent(src.transform.parent, false);
+        go.transform.localPosition = src.transform.localPosition;
+        go.transform.localRotation = src.transform.localRotation;
+        go.transform.localScale = src.transform.localScale;
+
+        var dst = go.AddComponent<SkinnedMeshRenderer>();
+        dst.rootBone = src.rootBone;
+        dst.bones = src.bones;
+        dst.localBounds = src.localBounds;
+        dst.quality = src.quality;
+        dst.updateWhenOffscreen = src.updateWhenOffscreen;
+        dst.skinnedMotionVectors = src.skinnedMotionVectors;
+        dst.shadowCastingMode = src.shadowCastingMode;
+        dst.receiveShadows = src.receiveShadows;
+        dst.lightProbeUsage = src.lightProbeUsage;
+        dst.reflectionProbeUsage = src.reflectionProbeUsage;
+        dst.probeAnchor = src.probeAnchor;
+        dst.allowOcclusionWhenDynamic = src.allowOcclusionWhenDynamic;
+
+        r.previewObject = go;
+        r.previewRenderer = dst;
     }
 
     private static void CaptureOriginals(NDMFVRoidMeshTrimmer trimmer, PreviewState state)
@@ -465,7 +575,9 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
                 {
                     renderer = usage.renderer,
                     originalSharedMesh = usage.renderer.sharedMesh,
-                    originalSharedMaterials = usage.renderer.sharedMaterials
+                    originalSharedMaterials = usage.renderer.sharedMaterials,
+                    originalEnabled = usage.renderer.enabled,
+                    originalForceRenderingOff = usage.renderer.forceRenderingOff
                 };
                 state.rendererStates.Add(usage.renderer, r);
                 trimmer.PreviewRecoveryRecords.Add(new NDMFVRoidMeshTrimmer.PreviewRecoveryRecord
@@ -509,7 +621,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
 
         foreach (var r in state.rendererStates.Values)
         {
-            if (r.renderer == null) continue;
+            if (r.previewRenderer == null) continue;
             var mats = (Material[])r.originalSharedMaterials.Clone();
             for (int i = 0; i < mats.Length; i++)
             {
@@ -542,7 +654,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
             }
 
             r.previewMaterials = mats;
-            r.renderer.sharedMaterials = mats;
+            r.previewRenderer.sharedMaterials = mats;
         }
     }
 
@@ -590,9 +702,11 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         var state = GetPreviewState(trimmer);
         foreach (var r in state.rendererStates.Values)
         {
-            if (r.renderer == null) continue;
-            r.renderer.sharedMesh = r.originalSharedMesh;
-            r.renderer.sharedMaterials = r.originalSharedMaterials;
+            if (r.renderer != null)
+            {
+                r.renderer.enabled = r.originalEnabled;
+                r.renderer.forceRenderingOff = r.originalForceRenderingOff;
+            }
             if (r.previewMesh != null) UnityEngine.Object.DestroyImmediate(r.previewMesh);
             if (r.previewMaterials != null)
             {
@@ -601,6 +715,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
                     if (pm != null) UnityEngine.Object.DestroyImmediate(pm);
                 }
             }
+            if (r.previewObject != null) UnityEngine.Object.DestroyImmediate(r.previewObject);
         }
 
         foreach (var t in state.textureStates.Values)
@@ -693,6 +808,7 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         }
 
         trimmer.targets.AddRange(grouped.Values);
+        AutoFillColorResolver.Apply(trimmer, trimmer.targets);
         EditorUtility.SetDirty(trimmer);
     }
 
@@ -755,9 +871,12 @@ public class NDMFVRoidMeshTrimmerNDMFPlugin : Plugin<NDMFVRoidMeshTrimmerNDMFPlu
                     continue;
                 }
 
-                NDMFVRoidMeshTrimmerEditor.EnsureAutoDetectedTargets(trimmer, !trimmer.enableTexturePadding);
+                NDMFVRoidMeshTrimmerEditor.EnsureAutoDetectedTargets(trimmer, false);
                 MeshTrimProcessor.ApplyTrim(trimmer, true);
-                TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
+                if (trimmer.enableTexturePadding)
+                {
+                    TexturePostProcessProcessor.ApplyBuildTimeReplacement(trimmer);
+                }
                 executedForCurrentPlatform = true;
             }
 
