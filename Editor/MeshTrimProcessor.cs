@@ -638,7 +638,7 @@ public static class MeshTrimProcessor
                     stats.allInsideButInteriorOutside++;
                 }
 
-                if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2 && TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2 && TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats))
                 {
                     bridgeStats.bridgeCutAppliedCount++;
                     bridgeStats.replacedClippedResultCount++;
@@ -668,7 +668,7 @@ public static class MeshTrimProcessor
                     {
                         if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2)
                         {
-                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats))
                             {
                                 bridgeStats.bridgeCutAppliedCount++;
                                 bridgeStats.replacedClippedResultCount++;
@@ -691,7 +691,7 @@ public static class MeshTrimProcessor
                     }
                     else
                     {
-                        if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2 && TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                        if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2 && TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats))
                         {
                             bridgeStats.bridgeCutAppliedCount++;
                             bridgeStats.replacedClippedResultCount++;
@@ -720,7 +720,7 @@ public static class MeshTrimProcessor
                     {
                         if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2)
                         {
-                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats))
                             {
                                 bridgeStats.bridgeCutAppliedCount++;
                                 bridgeStats.replacedClippedResultCount++;
@@ -845,7 +845,7 @@ public static class MeshTrimProcessor
                 AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
                 AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
                 if (trimmer.enableBridgeCut && CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
-                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats))
                 {
                     bridgeStats.bridgeCutAppliedCount++;
                     bridgeStats.replacedClippedResultCount++;
@@ -893,7 +893,7 @@ public static class MeshTrimProcessor
                 AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
                 AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
                 if (trimmer.enableBridgeCut && CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
-                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats))
                 {
                     bridgeStats.bridgeCutAppliedCount++;
                     bridgeStats.replacedClippedResultCount++;
@@ -931,7 +931,7 @@ public static class MeshTrimProcessor
                 if (!removedCandidate && !smallAreaCandidate && !continuityCandidate) continue;
                 if (neighborCutEdges < 2) continue;
 
-                if (TryBridgeCutAmbiguousTriangle(r.triangleIndex, ti0, ti1, ti2, edgeCuts, dstIndices, vertices, uv, trimmer, ref stats))
+                if (TryBridgeCutAmbiguousTriangle(r.triangleIndex, ti0, ti1, ti2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats))
                 {
                     bridgeStats.bridgeCutAppliedCount++;
                     bridgeStats.replacedClippedResultCount++;
@@ -996,7 +996,7 @@ public static class MeshTrimProcessor
 
 
     private static bool TryBridgeCutAmbiguousTriangle(int triIndex, int i0, int i1, int i2, List<EdgeCutInfo> edgeCuts, List<int> dstIndices,
-        List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, ref TrimStats stats)
+        List<Vector3> vertices, List<Vector2> uv, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer, ref TrimStats stats)
     {
         EdgeCutInfo c01 = default, c12 = default, c20 = default;
         bool h01=false,h12=false,h20=false;
@@ -1027,26 +1027,31 @@ public static class MeshTrimProcessor
         bool keepSharedCorner;
         if (trimmer.bridgeUseNeighborKeptSide)
         {
-            int sharedVotes = 0;
-            int oppositeVotes = 0;
+            Vector2 sharedCentroid = (uv[shared] + uv[cutA] + uv[cutB]) / 3f;
+            Vector2 oppositeCentroid = (uv[other1] + uv[other2] + uv[cutA] + uv[cutB]) * 0.25f;
 
-            if (sideA.edgeA == shared) sharedVotes++;
-            else if (sideA.edgeA == other1 || sideA.edgeA == other2) oppositeVotes++;
+            float sharedNeighborScore = 0f;
+            float oppositeNeighborScore = 0f;
 
-            if (sideB.edgeA == shared) sharedVotes++;
-            else if (sideB.edgeA == other1 || sideB.edgeA == other2) oppositeVotes++;
+            sharedNeighborScore += 1f / (Vector2.Distance(sharedCentroid, sideA.keptSideCentroidUv) + 1e-5f);
+            sharedNeighborScore += 1f / (Vector2.Distance(sharedCentroid, sideB.keptSideCentroidUv) + 1e-5f);
+            oppositeNeighborScore += 1f / (Vector2.Distance(oppositeCentroid, sideA.keptSideCentroidUv) + 1e-5f);
+            oppositeNeighborScore += 1f / (Vector2.Distance(oppositeCentroid, sideB.keptSideCentroidUv) + 1e-5f);
 
-            if (sharedVotes == oppositeVotes)
+            if (Mathf.Abs(sharedNeighborScore - oppositeNeighborScore) < 1e-4f)
             {
-                // Tie: fallback to UV-area based side selection.
-                float sharedArea = Mathf.Abs(SignedArea(uv[shared], uv[cutA], uv[cutB])) * 0.5f;
-                float totalArea = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f;
-                float oppositeArea = Mathf.Max(0f, totalArea - sharedArea);
-                keepSharedCorner = sharedArea >= oppositeArea;
+                // Tie: fallback to mask sampling ratio at representative points.
+                int sharedInsideVotes = 0;
+                if (AlphaMaskProcessor.SampleMask(maskData, sharedCentroid)) sharedInsideVotes++;
+                if (AlphaMaskProcessor.SampleMask(maskData, uv[shared])) sharedInsideVotes++;
+                int oppositeInsideVotes = 0;
+                if (AlphaMaskProcessor.SampleMask(maskData, oppositeCentroid)) oppositeInsideVotes++;
+                if (AlphaMaskProcessor.SampleMask(maskData, (uv[other1] + uv[other2]) * 0.5f)) oppositeInsideVotes++;
+                keepSharedCorner = sharedInsideVotes >= oppositeInsideVotes;
             }
             else
             {
-                keepSharedCorner = sharedVotes > oppositeVotes;
+                keepSharedCorner = sharedNeighborScore > oppositeNeighborScore;
             }
         }
         else
