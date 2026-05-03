@@ -720,11 +720,39 @@ public static class MeshTrimProcessor
 
     private static (int keepA, int cutA1, int cutA2, int keepB, int cutB1, int cutB2) SelectBridgeCutPair(int i0, int i1, int i2, Dictionary<long, BoundaryCrossing> crossByEdge, List<Vector2> uv, ref int byNeighbor, ref int byArea)
     {
-        // neighbor continuity data is unavailable in this reduced pass, so we currently select by area stability.
-        byArea++;
-        float a0 = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2]));
-        if (a0 <= 0f) { byNeighbor++; return (i0, i1, i2, i1, i0, i2); }
-        return (i0, i1, i2, i1, i0, i2);
+        var candidates = new (int keepA, int cutA1, int cutA2, int keepB, int cutB1, int cutB2)[]
+        {
+            (i0, i1, i2, i1, i0, i2),
+            (i1, i0, i2, i2, i0, i1),
+            (i2, i0, i1, i0, i1, i2),
+        };
+
+        int bestIdx = 0;
+        int bestSupport = -1;
+        float bestArea = -1f;
+        for (int c = 0; c < candidates.Length; c++)
+        {
+            var k = candidates[c];
+            int support = 0;
+            if (crossByEdge.ContainsKey(MakeEdgeKey(k.keepA, k.cutA1))) support++;
+            if (crossByEdge.ContainsKey(MakeEdgeKey(k.keepA, k.cutA2))) support++;
+            if (crossByEdge.ContainsKey(MakeEdgeKey(k.keepB, k.cutB1))) support++;
+            if (crossByEdge.ContainsKey(MakeEdgeKey(k.keepB, k.cutB2))) support++;
+
+            float areaA = Mathf.Abs(SignedArea(uv[k.keepA], uv[k.cutA1], uv[k.cutA2]));
+            float areaB = Mathf.Abs(SignedArea(uv[k.keepB], uv[k.cutB1], uv[k.cutB2]));
+            float areaScore = areaA + areaB;
+            if (support > bestSupport || (support == bestSupport && areaScore > bestArea))
+            {
+                bestSupport = support;
+                bestArea = areaScore;
+                bestIdx = c;
+            }
+        }
+
+        if (bestSupport >= 3) byNeighbor++;
+        else byArea++;
+        return candidates[bestIdx];
     }
 
     private static int CreateCrossingVertex(int a, int b, Dictionary<long, BoundaryCrossing> crossByEdge, Dictionary<long, int> createdVertexByEdge, NDMFVRoidMeshTrimmer trimmer,
