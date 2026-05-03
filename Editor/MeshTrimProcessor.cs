@@ -102,6 +102,11 @@ public static class MeshTrimProcessor
         public int allEdgeMidpointsInsidePreserved;
         public int fallbackPreserved;
         public int trianglesWithFourOrMoreBoundaryPoints;
+        public int zeroBoundaryKeepCount;
+        public int zeroBoundaryDeleteCount;
+        public int centroidOnlyDeletedCount;
+        public int zeroBoundaryMixedKeepCount;
+        public int zeroBoundaryMixedDeleteCount;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -636,6 +641,15 @@ public static class MeshTrimProcessor
             Vector2 m01 = (uv[i0] + uv[i1]) * 0.5f;
             Vector2 m12 = (uv[i1] + uv[i2]) * 0.5f;
             Vector2 m20 = (uv[i2] + uv[i0]) * 0.5f;
+            Vector2 s01025 = Vector2.Lerp(uv[i0], uv[i1], 0.25f);
+            Vector2 s01050 = Vector2.Lerp(uv[i0], uv[i1], 0.5f);
+            Vector2 s01075 = Vector2.Lerp(uv[i0], uv[i1], 0.75f);
+            Vector2 s12025 = Vector2.Lerp(uv[i1], uv[i2], 0.25f);
+            Vector2 s12050 = Vector2.Lerp(uv[i1], uv[i2], 0.5f);
+            Vector2 s12075 = Vector2.Lerp(uv[i1], uv[i2], 0.75f);
+            Vector2 s20025 = Vector2.Lerp(uv[i2], uv[i0], 0.25f);
+            Vector2 s20050 = Vector2.Lerp(uv[i2], uv[i0], 0.5f);
+            Vector2 s20075 = Vector2.Lerp(uv[i2], uv[i0], 0.75f);
             Vector2 centroid = (uv[i0] + uv[i1] + uv[i2]) / 3f;
             bool m01In = AlphaMaskProcessor.SampleMask(maskData, m01);
             bool m12In = AlphaMaskProcessor.SampleMask(maskData, m12);
@@ -675,6 +689,60 @@ public static class MeshTrimProcessor
 
             if (insideCount == 0)
             {
+                if (boundaryPointsDetected == 0)
+                {
+                    bool s01025In = AlphaMaskProcessor.SampleMask(maskData, s01025);
+                    bool s01050In = AlphaMaskProcessor.SampleMask(maskData, s01050);
+                    bool s01075In = AlphaMaskProcessor.SampleMask(maskData, s01075);
+                    bool s12025In = AlphaMaskProcessor.SampleMask(maskData, s12025);
+                    bool s12050In = AlphaMaskProcessor.SampleMask(maskData, s12050);
+                    bool s12075In = AlphaMaskProcessor.SampleMask(maskData, s12075);
+                    bool s20025In = AlphaMaskProcessor.SampleMask(maskData, s20025);
+                    bool s20050In = AlphaMaskProcessor.SampleMask(maskData, s20050);
+                    bool s20075In = AlphaMaskProcessor.SampleMask(maskData, s20075);
+
+                    int sampleCount = 13;
+                    int expandedInsideCount =
+                        (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0) +
+                        (s01025In ? 1 : 0) + (s01050In ? 1 : 0) + (s01075In ? 1 : 0) +
+                        (s12025In ? 1 : 0) + (s12050In ? 1 : 0) + (s12075In ? 1 : 0) +
+                        (s20025In ? 1 : 0) + (s20050In ? 1 : 0) + (s20075In ? 1 : 0) +
+                        (centroidIn ? 1 : 0);
+
+                    bool keepZeroBoundary;
+                    if (expandedInsideCount == 0) keepZeroBoundary = false;
+                    else if (expandedInsideCount == sampleCount) keepZeroBoundary = true;
+                    else if (expandedInsideCount <= 1) keepZeroBoundary = false;
+                    else if (expandedInsideCount >= sampleCount - 1) keepZeroBoundary = true;
+                    else keepZeroBoundary = ((float)expandedInsideCount / sampleCount) >= 0.5f;
+
+                    if (keepZeroBoundary)
+                    {
+                        AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                        stats.zeroBoundaryKeepCount++;
+                        if (expandedInsideCount > 1 && expandedInsideCount < sampleCount - 1)
+                        {
+                            stats.zeroBoundaryMixedKeepCount++;
+                        }
+                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 0));
+                    }
+                    else
+                    {
+                        stats.removedTriangles++;
+                        stats.zeroBoundaryDeleteCount++;
+                        if (expandedInsideCount == 1 && centroidIn)
+                        {
+                            stats.centroidOnlyDeletedCount++;
+                        }
+                        if (expandedInsideCount > 1 && expandedInsideCount < sampleCount - 1)
+                        {
+                            stats.zeroBoundaryMixedDeleteCount++;
+                        }
+                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
+                    }
+                    continue;
+                }
+
                 int edgeInsideCount = (m01In ? 1 : 0) + (m12In ? 1 : 0) + (m20In ? 1 : 0);
                 if (m01In || m12In || m20In || centroidIn)
                 {
@@ -961,6 +1029,7 @@ public static class MeshTrimProcessor
 
         Debug.Log($"[NDMF VRoid Mesh Trimmer] EdgeCrossingCache created count={cache.CreatedCount}, hit count={cache.HitCount}, shared edge crossings reused count={cache.ReusedCount}, edges with 0 crossings={edgesWith0Crossings}, edges with 1 crossing={edgesWith1Crossing}, edges with 2 crossings={edgesWith2Crossings}, max crossings on edge={maxCrossingsOnEdge}, triangles with 4+ boundary points detected={stats.trianglesWithFourOrMoreBoundaryPoints}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Triangle boundary points summary: triangles with 0 boundary points={trianglesWith0BoundaryPoints}, triangles with 1 boundary point={trianglesWith1BoundaryPoint}, triangles with 2 boundary points={trianglesWith2BoundaryPoints}, triangles with 3 boundary points={trianglesWith3BoundaryPoints}, triangles with 4 boundary points={trianglesWith4BoundaryPoints}, triangles with 5+ boundary points={trianglesWith5OrMoreBoundaryPoints}, max boundary points on triangle={maxBoundaryPointsOnTriangle}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Zero-boundary sampling summary: zero-boundary keep count={stats.zeroBoundaryKeepCount}, zero-boundary delete count={stats.zeroBoundaryDeleteCount}, centroid-only deleted count={stats.centroidOnlyDeletedCount}, zero-boundary mixed keep count={stats.zeroBoundaryMixedKeepCount}, zero-boundary mixed delete count={stats.zeroBoundaryMixedDeleteCount}");
         return stats;
     }
 
