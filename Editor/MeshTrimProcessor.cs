@@ -1828,18 +1828,18 @@ public static class MeshTrimProcessor
             {
                 continue;
             }
-            var generated = new List<int>();
-            if (keepA) TriangulateRegion(i0, i1, i2, rA, vertices, uv, trimmer, generated, ref stats);
-            if (keepB) TriangulateRegion(i0, i1, i2, rB, vertices, uv, trimmer, generated, ref stats);
-            if (keepMid) TriangulateRegion(i0, i1, i2, rMid, vertices, uv, trimmer, generated, ref stats);
+            var generatedIndices = new List<int>();
+            if (keepA) TriangulateRegion(i0, i1, i2, rA, vertices, uv, trimmer, generatedIndices, ref stats);
+            if (keepB) TriangulateRegion(i0, i1, i2, rB, vertices, uv, trimmer, generatedIndices, ref stats);
+            if (keepMid) TriangulateRegion(i0, i1, i2, rMid, vertices, uv, trimmer, generatedIndices, ref stats);
             acceptedTriangles.Clear();
             insideTriCount = 0;
             outsideTriCount = 0;
-            for (int t = 0; t + 2 < generated.Count; t += 3)
+            for (int t = 0; t + 2 < generatedIndices.Count; t += 3)
             {
-                int a = generated[t];
-                int b = generated[t + 1];
-                int c = generated[t + 2];
+                int a = generatedIndices[t];
+                int b = generatedIndices[t + 1];
+                int c = generatedIndices[t + 2];
                 if (!TrySampleTriangleInsideRatio(maskData, uv[a], uv[b], uv[c], out float ratio))
                 {
                     hasInvalidSampling = true;
