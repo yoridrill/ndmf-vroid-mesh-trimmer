@@ -948,6 +948,31 @@ public static class MeshTrimProcessor
             }
         }
 
+        // Fill extended per-triangle metadata from collected cut records.
+        var cutPointsByTri = new Dictionary<int, List<int>>();
+        for (int i = 0; i < edgeCuts.Count; i++)
+        {
+            var e = edgeCuts[i];
+            if (!cutPointsByTri.TryGetValue(e.triangleIndex, out var list))
+            {
+                list = new List<int>(2);
+                cutPointsByTri[e.triangleIndex] = list;
+            }
+            if (!list.Contains(e.cutPointIndex)) list.Add(e.cutPointIndex);
+        }
+        for (int i = 0; i < triangleResults.Count; i++)
+        {
+            var r = triangleResults[i];
+            if (cutPointsByTri.TryGetValue(r.triangleIndex, out var cps))
+            {
+                r.cutPoints = cps.ToArray();
+            }
+            if (r.state == TriangleTrimState.StrongTrim) r.generatedTriangles = 0;
+            else if (r.state == TriangleTrimState.StrongKeep) r.generatedTriangles = 1;
+            else if (r.state == TriangleTrimState.Clipped) r.generatedTriangles = r.keptAreaRatio > 0.5f ? 2 : 1;
+            triangleResults[i] = r;
+        }
+
         stats.outputTriangles = dstIndices.Count / 3;
         bridgeStats.totalTriangles = srcIndices.Length / 3;
         if (trimmer.enableBridgeCut)
