@@ -1782,9 +1782,50 @@ public static class MeshTrimProcessor
     {
         if (boundaryPoints == null || boundaryPoints.Count != 4) return false;
         boundaryPoints.Sort((a, b) => a.perimeterOrder.CompareTo(b.perimeterOrder));
-        var p0 = boundaryPoints[0]; var p1 = boundaryPoints[1]; var p2 = boundaryPoints[2]; var p3 = boundaryPoints[3];
-        if (SegmentsIntersect(uv[p0.vertexIndex], uv[p1.vertexIndex], uv[p2.vertexIndex], uv[p3.vertexIndex])) return false;
+        int[][] pairings =
+        {
+            new[] { 0, 1, 2, 3 }, // p0-p1, p2-p3
+            new[] { 1, 2, 3, 0 }  // fallback pairing
+        };
 
+        int before = dstIndices.Count / 3;
+        bool attempted = false;
+
+        foreach (var pairing in pairings)
+        {
+            var p0 = boundaryPoints[pairing[0]];
+            var p1 = boundaryPoints[pairing[1]];
+            var p2 = boundaryPoints[pairing[2]];
+            var p3 = boundaryPoints[pairing[3]];
+
+            if (SegmentsIntersect(uv[p0.vertexIndex], uv[p1.vertexIndex], uv[p2.vertexIndex], uv[p3.vertexIndex]))
+            {
+                continue;
+            }
+
+            attempted = true;
+            BuildFourBoundaryRegions(i0, i1, i2, p0, p1, p2, p3, out var rA, out var rB, out var rMid);
+            bool keepA = EstimateKeep(maskData, rA, uv);
+            bool keepB = EstimateKeep(maskData, rB, uv);
+            bool keepMid = EstimateKeep(maskData, rMid, uv);
+            if (keepA) TriangulateRegion(i0, i1, i2, rA, vertices, uv, trimmer, dstIndices, ref stats);
+            if (keepB) TriangulateRegion(i0, i1, i2, rB, vertices, uv, trimmer, dstIndices, ref stats);
+            if (keepMid) TriangulateRegion(i0, i1, i2, rMid, vertices, uv, trimmer, dstIndices, ref stats);
+            break;
+        }
+
+        if (!attempted) return false;
+        int generated = (dstIndices.Count / 3) - before;
+        if (generated <= 0) return false;
+        stats.fourPointClipSuccessCount++;
+        stats.fourPointClipGeneratedTriangles += generated;
+        return true;
+    }
+
+    private static void BuildFourBoundaryRegions(
+        int i0, int i1, int i2, BoundaryPoint p0, BoundaryPoint p1, BoundaryPoint p2, BoundaryPoint p3,
+        out List<int> rA, out List<int> rB, out List<int> rMid)
+    {
         int[] tri = { i0, i1, i2 };
         List<int> BuildCap(BoundaryPoint a, BoundaryPoint b)
         {
@@ -1800,9 +1841,9 @@ public static class MeshTrimProcessor
             return poly;
         }
 
-        var rA = BuildCap(p0, p1);
-        var rB = BuildCap(p2, p3);
-        var rMid = new List<int>() { p1.vertexIndex };
+        rA = BuildCap(p0, p1);
+        rB = BuildCap(p2, p3);
+        rMid = new List<int>() { p1.vertexIndex };
         int eMid = p1.edgeIndex;
         while (true)
         {
@@ -1820,27 +1861,35 @@ public static class MeshTrimProcessor
             eMid = (eMid + 1) % 3;
         }
         rMid.Add(p0.vertexIndex);
-
-        bool keepA = EstimateKeep(maskData, rA, uv);
-        bool keepB = EstimateKeep(maskData, rB, uv);
-        bool keepMid = EstimateKeep(maskData, rMid, uv);
-        int before = dstIndices.Count / 3;
-        if (keepA) TriangulateRegion(i0,i1,i2,rA,vertices,uv,trimmer,dstIndices,ref stats);
-        if (keepB) TriangulateRegion(i0,i1,i2,rB,vertices,uv,trimmer,dstIndices,ref stats);
-        if (keepMid) TriangulateRegion(i0,i1,i2,rMid,vertices,uv,trimmer,dstIndices,ref stats);
-        int generated = (dstIndices.Count / 3) - before;
-        if (generated <= 0) return true;
-        stats.fourPointClipSuccessCount++;
-        stats.fourPointClipGeneratedTriangles += generated;
-        return true;
     }
 
     private static bool EstimateKeep(AlphaMaskProcessor.AlphaMaskData maskData, List<int> region, List<Vector2> uv)
     {
         int inside = 0;
-        for (int i = 0; i < region.Count; i++) if (AlphaMaskProcessor.SampleMask(maskData, uv[region[i]])) inside++;
-        if (AlphaMaskProcessor.SampleMask(maskData, AverageUv(region, uv))) inside++;
-        return inside >= ((region.Count + 1) * 0.5f);
+        int samples = 0;
+        for (int i = 0; i < region.Count; i++)
+        {
+            if (AlphaMaskProcessor.SampleMask(maskData, uv[region[i]])) inside++;
+            samples++;
+        }
+
+        Vector2 centroid = AverageUv(region, uv);
+        if (AlphaMaskProcessor.SampleMask(maskData, centroid)) inside++;
+        samples++;
+
+        for (int i = 0; i < region.Count; i++)
+        {
+            Vector2 a = uv[region[i]];
+            Vector2 b = uv[region[(i + 1) % region.Count]];
+            Vector2 mid = (a + b) * 0.5f;
+            if (AlphaMaskProcessor.SampleMask(maskData, mid)) inside++;
+            samples++;
+            Vector2 centerBlend = (mid + centroid) * 0.5f;
+            if (AlphaMaskProcessor.SampleMask(maskData, centerBlend)) inside++;
+            samples++;
+        }
+
+        return inside >= (samples * 0.5f);
     }
 
 
@@ -1854,9 +1903,15 @@ public static class MeshTrimProcessor
     private static void TriangulateRegion(int srcA, int srcB, int srcC, List<int> poly, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, List<int> dstIndices, ref TrimStats stats)
     {
         if (poly == null || poly.Count < 3) return;
+
         if (poly.Count == 3)
         {
             AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[1], poly[2], vertices, uv, trimmer, ref stats);
+            return;
+        }
+
+        if (TryTriangulateEarClipping(srcA, srcB, srcC, poly, vertices, uv, trimmer, dstIndices, ref stats))
+        {
             return;
         }
 
@@ -1864,6 +1919,68 @@ public static class MeshTrimProcessor
         {
             AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[i], poly[i + 1], vertices, uv, trimmer, ref stats);
         }
+    }
+
+    private static bool TryTriangulateEarClipping(int srcA, int srcB, int srcC, List<int> poly, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, List<int> dstIndices, ref TrimStats stats)
+    {
+        var working = new List<int>(poly);
+        float area = 0f;
+        for (int i = 0; i < working.Count; i++)
+        {
+            Vector2 a = uv[working[i]];
+            Vector2 b = uv[working[(i + 1) % working.Count]];
+            area += (a.x * b.y) - (a.y * b.x);
+        }
+        bool ccw = area > 0f;
+        int guard = 0;
+        while (working.Count > 3 && guard++ < 64)
+        {
+            bool foundEar = false;
+            for (int i = 0; i < working.Count; i++)
+            {
+                int iPrev = working[(i - 1 + working.Count) % working.Count];
+                int iCurr = working[i];
+                int iNext = working[(i + 1) % working.Count];
+                float cross = SignedArea(uv[iPrev], uv[iCurr], uv[iNext]);
+                if (ccw ? cross <= 1e-8f : cross >= -1e-8f) continue;
+
+                bool contains = false;
+                for (int j = 0; j < working.Count; j++)
+                {
+                    int test = working[j];
+                    if (test == iPrev || test == iCurr || test == iNext) continue;
+                    if (PointInTriangleUv(uv[test], uv[iPrev], uv[iCurr], uv[iNext]))
+                    {
+                        contains = true;
+                        break;
+                    }
+                }
+                if (contains) continue;
+
+                AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, iPrev, iCurr, iNext, vertices, uv, trimmer, ref stats);
+                working.RemoveAt(i);
+                foundEar = true;
+                break;
+            }
+            if (!foundEar) return false;
+        }
+
+        if (working.Count == 3)
+        {
+            AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, working[0], working[1], working[2], vertices, uv, trimmer, ref stats);
+            return true;
+        }
+        return false;
+    }
+
+    private static bool PointInTriangleUv(Vector2 p, Vector2 a, Vector2 b, Vector2 c)
+    {
+        float s1 = SignedArea(a, b, p);
+        float s2 = SignedArea(b, c, p);
+        float s3 = SignedArea(c, a, p);
+        bool hasNeg = (s1 < 0f) || (s2 < 0f) || (s3 < 0f);
+        bool hasPos = (s1 > 0f) || (s2 > 0f) || (s3 > 0f);
+        return !(hasNeg && hasPos);
     }
 
     private static void AddTrianglePreserveWinding(
