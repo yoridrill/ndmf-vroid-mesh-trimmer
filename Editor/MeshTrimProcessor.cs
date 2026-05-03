@@ -114,6 +114,9 @@ public static class MeshTrimProcessor
         public int fourPlusBoundaryFallbackCount;
         public int fourPlusBoundaryKeepCount;
         public int fourPlusBoundaryDeleteCount;
+        public int fourPointClipSuccessCount;
+        public int fourPointClipFallbackCount;
+        public int fourPointClipGeneratedTriangles;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -682,9 +685,16 @@ public static class MeshTrimProcessor
 
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
 
+            if (boundaryPointsDetected == 4 && TryProcessFourBoundaryTriangle(i0, i1, i2, boundaryPoints, maskData, trimmer, vertices, uv, dstIndices, ref stats))
+            {
+                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
+                continue;
+            }
+
             if (boundaryPointsDetected >= 4)
             {
                 stats.fourPlusBoundaryFallbackCount++;
+                stats.fourPointClipFallbackCount++;
                 const int sampleCount = 13;
                 int expandedInsideCount = CountExpandedInsideSamples(maskData, uv[i0], uv[i1], uv[i2], in0, in1, in2, centroidIn);
                 bool keepFourPlusBoundaryFallback = expandedInsideCount >= (sampleCount * 0.5f);
@@ -1067,6 +1077,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Zero-boundary sampling summary: zero-boundary keep count={stats.zeroBoundaryKeepCount}, zero-boundary delete count={stats.zeroBoundaryDeleteCount}, centroid-only deleted count={stats.centroidOnlyDeletedCount}, zero-boundary mixed keep count={stats.zeroBoundaryMixedKeepCount}, zero-boundary mixed delete count={stats.zeroBoundaryMixedDeleteCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Two-boundary summary: two-boundary processed count={stats.twoBoundaryProcessedCount}, two-boundary kept region count={stats.twoBoundaryKeptRegionCount}, two-boundary generated triangles count={stats.twoBoundaryGeneratedTrianglesCount}, two-boundary fallback count={stats.twoBoundaryFallbackCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Four-plus-boundary fallback summary: four-plus-boundary fallback count={stats.fourPlusBoundaryFallbackCount}, four-plus-boundary keep count={stats.fourPlusBoundaryKeepCount}, four-plus-boundary delete count={stats.fourPlusBoundaryDeleteCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
         return stats;
     }
 
@@ -1764,6 +1775,88 @@ public static class MeshTrimProcessor
         return true;
     }
 
+
+    private static bool TryProcessFourBoundaryTriangle(
+        int i0, int i1, int i2, List<BoundaryPoint> boundaryPoints, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices, List<Vector2> uv, List<int> dstIndices, ref TrimStats stats)
+    {
+        if (boundaryPoints == null || boundaryPoints.Count != 4) return false;
+        boundaryPoints.Sort((a, b) => a.perimeterOrder.CompareTo(b.perimeterOrder));
+        var p0 = boundaryPoints[0]; var p1 = boundaryPoints[1]; var p2 = boundaryPoints[2]; var p3 = boundaryPoints[3];
+        if (SegmentsIntersect(uv[p0.vertexIndex], uv[p1.vertexIndex], uv[p2.vertexIndex], uv[p3.vertexIndex])) return false;
+
+        int[] tri = { i0, i1, i2 };
+        List<int> BuildCap(BoundaryPoint a, BoundaryPoint b)
+        {
+            var poly = new List<int>() { a.vertexIndex };
+            int e = a.edgeIndex;
+            while (true)
+            {
+                poly.Add(tri[(e + 1) % 3]);
+                if (e == b.edgeIndex) break;
+                e = (e + 1) % 3;
+            }
+            poly.Add(b.vertexIndex);
+            return poly;
+        }
+
+        var rA = BuildCap(p0, p1);
+        var rB = BuildCap(p2, p3);
+        var rMid = new List<int>() { p1.vertexIndex };
+        int eMid = p1.edgeIndex;
+        while (true)
+        {
+            rMid.Add(tri[(eMid + 1) % 3]);
+            if (eMid == p2.edgeIndex) break;
+            eMid = (eMid + 1) % 3;
+        }
+        rMid.Add(p2.vertexIndex);
+        rMid.Add(p3.vertexIndex);
+        eMid = p3.edgeIndex;
+        while (true)
+        {
+            rMid.Add(tri[(eMid + 1) % 3]);
+            if (eMid == p0.edgeIndex) break;
+            eMid = (eMid + 1) % 3;
+        }
+        rMid.Add(p0.vertexIndex);
+
+        bool keepA = EstimateKeep(maskData, rA, uv);
+        bool keepB = EstimateKeep(maskData, rB, uv);
+        bool keepMid = EstimateKeep(maskData, rMid, uv);
+        int before = dstIndices.Count / 3;
+        if (keepA) TriangulateRegion(i0,i1,i2,rA,vertices,uv,trimmer,dstIndices,ref stats);
+        if (keepB) TriangulateRegion(i0,i1,i2,rB,vertices,uv,trimmer,dstIndices,ref stats);
+        if (keepMid) TriangulateRegion(i0,i1,i2,rMid,vertices,uv,trimmer,dstIndices,ref stats);
+        int generated = (dstIndices.Count / 3) - before;
+        if (generated <= 0) return true;
+        stats.fourPointClipSuccessCount++;
+        stats.fourPointClipGeneratedTriangles += generated;
+        return true;
+    }
+
+    private static bool EstimateKeep(AlphaMaskProcessor.AlphaMaskData maskData, List<int> region, List<Vector2> uv)
+    {
+        int inside = 0;
+        for (int i = 0; i < region.Count; i++) if (AlphaMaskProcessor.SampleMask(maskData, uv[region[i]])) inside++;
+        if (AlphaMaskProcessor.SampleMask(maskData, AverageUv(region, uv))) inside++;
+        return inside >= ((region.Count + 1) * 0.5f);
+    }
+
+    private static bool SegmentsIntersect(Vector2 a1, Vector2 a2, Vector2 b1, Vector2 b2)
+    {
+        float o1 = Orient(a1, a2, b1);
+        float o2 = Orient(a1, a2, b2);
+        float o3 = Orient(b1, b2, a1);
+        float o4 = Orient(b1, b2, a2);
+        return (o1 * o2 < 0f) && (o3 * o4 < 0f);
+    }
+
+    private static float Orient(Vector2 a, Vector2 b, Vector2 c)
+    {
+        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+    }
+
     private static Vector2 AverageUv(List<int> polygon, List<Vector2> uv)
     {
         Vector2 sum = Vector2.zero;
@@ -1773,16 +1866,16 @@ public static class MeshTrimProcessor
 
     private static void TriangulateRegion(int srcA, int srcB, int srcC, List<int> poly, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, List<int> dstIndices, ref TrimStats stats)
     {
+        if (poly == null || poly.Count < 3) return;
         if (poly.Count == 3)
         {
             AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[1], poly[2], vertices, uv, trimmer, ref stats);
             return;
         }
-        if (poly.Count == 4)
+
+        for (int i = 1; i < poly.Count - 1; i++)
         {
-            AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[1], poly[2], vertices, uv, trimmer, ref stats);
-            AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[2], poly[3], vertices, uv, trimmer, ref stats);
-            return;
+            AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[i], poly[i + 1], vertices, uv, trimmer, ref stats);
         }
     }
 
