@@ -541,6 +541,64 @@ public static class MeshTrimProcessor
         var edgeCuts = new List<EdgeCutInfo>();
         EdgeIntersectionCache cache = new EdgeIntersectionCache();
 
+        // Prepass: generate and record all direct edge intersections first.
+        // BridgeCut decisions rely on complete cut-edge context across the whole submesh.
+        for (int i = 0; i < srcIndices.Length; i += 3)
+        {
+            int triIndex = i / 3;
+            int i0 = srcIndices[i];
+            int i1 = srcIndices[i + 1];
+            int i2 = srcIndices[i + 2];
+            bool in0 = AlphaMaskProcessor.SampleMask(maskData, uv[i0]);
+            bool in1 = AlphaMaskProcessor.SampleMask(maskData, uv[i1]);
+            bool in2 = AlphaMaskProcessor.SampleMask(maskData, uv[i2]);
+            int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
+
+            int[] idx = { i0, i1, i2 };
+            bool[] inside = { in0, in1, in2 };
+
+            if (insideCount == 1)
+            {
+                int insideV = -1, outA = -1, outB = -1;
+                for (int k = 0; k < 3; k++)
+                {
+                    if (inside[k]) insideV = idx[k];
+                    else if (outA < 0) outA = idx[k];
+                    else outB = idx[k];
+                }
+                int cutA = GetOrCreateIntersection(insideV, outA, maskData, trimmer,
+                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                    vertexSources, cache, ref stats);
+                int cutB = GetOrCreateIntersection(insideV, outB, maskData, trimmer,
+                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                    vertexSources, cache, ref stats);
+                AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
+                AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
+            }
+            else if (insideCount == 2)
+            {
+                int outsideV = -1, inA = -1, inB = -1;
+                for (int k = 0; k < 3; k++)
+                {
+                    if (!inside[k]) outsideV = idx[k];
+                    else if (inA < 0) inA = idx[k];
+                    else inB = idx[k];
+                }
+                int cutA = GetOrCreateIntersection(inA, outsideV, maskData, trimmer,
+                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                    vertexSources, cache, ref stats);
+                int cutB = GetOrCreateIntersection(inB, outsideV, maskData, trimmer,
+                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
+                    vertexSources, cache, ref stats);
+                AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
+                AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
+            }
+        }
+
         for (int i = 0; i < srcIndices.Length; i += 3)
         {
             int triIndex = i / 3;
