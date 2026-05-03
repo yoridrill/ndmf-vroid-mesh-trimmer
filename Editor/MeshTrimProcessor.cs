@@ -2118,7 +2118,8 @@ public static class MeshTrimProcessor
         if (discardStripPreferred)
         {
             stats.twoEdgeTwoCrossingsStripDiscardedCount++;
-            if ((selectedOutsideTrianglesAlt != null && selectedOutsideTrianglesAlt.Count > selectedOutsideTriangles.Count))
+            int currentOutsideCount = selectedOutsideTriangles != null ? selectedOutsideTriangles.Count : 0;
+            if (selectedOutsideTrianglesAlt != null && selectedOutsideTrianglesAlt.Count > currentOutsideCount)
             {
                 selectedOutsideTriangles = selectedOutsideTrianglesAlt;
                 selectedStripCandidate += "+altOutside";
