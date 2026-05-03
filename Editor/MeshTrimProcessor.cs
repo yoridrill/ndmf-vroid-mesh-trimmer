@@ -747,6 +747,7 @@ public static class MeshTrimProcessor
                 if (TryProcessFourBoundaryTriangle(i0, i1, i2, triIndex, boundaryPoints, maskData, trimmer, vertices, uv, dstIndices, ref stats, debugCandidates, rendererName, subMeshIndex, materialName, textureName))
                 {
                     twoLineSucceeded = true;
+                    if (trimmer.debugFourPointClipDetails) Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] triangleIndex={triIndex}, attemptedTwoLine={attemptedTwoLine}, twoLineSucceeded={twoLineSucceeded}, fellBackToLegacySingleCut={fellBackToLegacySingleCut}, legacySingleCutSucceeded={legacySingleCutSucceeded}, finalPath=twoLine");
                     triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
                     continue;
                 }
