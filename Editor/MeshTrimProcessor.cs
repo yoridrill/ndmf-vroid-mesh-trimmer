@@ -111,6 +111,9 @@ public static class MeshTrimProcessor
         public int twoBoundaryKeptRegionCount;
         public int twoBoundaryGeneratedTrianglesCount;
         public int twoBoundaryFallbackCount;
+        public int fourPlusBoundaryFallbackCount;
+        public int fourPlusBoundaryKeepCount;
+        public int fourPlusBoundaryDeleteCount;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -679,6 +682,28 @@ public static class MeshTrimProcessor
 
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
 
+            if (boundaryPointsDetected >= 4)
+            {
+                stats.fourPlusBoundaryFallbackCount++;
+                const int sampleCount = 13;
+                int expandedInsideCount = CountExpandedInsideSamples(maskData, uv[i0], uv[i1], uv[i2], in0, in1, in2, centroidIn);
+                bool keepFourPlusBoundaryFallback = expandedInsideCount >= (sampleCount * 0.5f);
+
+                if (keepFourPlusBoundaryFallback)
+                {
+                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                    stats.fourPlusBoundaryKeepCount++;
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 0));
+                }
+                else
+                {
+                    stats.removedTriangles++;
+                    stats.fourPlusBoundaryDeleteCount++;
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 0f, 0));
+                }
+                continue;
+            }
+
             if (boundaryPointsDetected == 2 && TryProcessTwoBoundaryTriangle(i0, i1, i2, boundaryPoints, insideCount, maskData, trimmer, vertices, uv, dstIndices, ref stats))
             {
                 triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 1));
@@ -1041,7 +1066,36 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Triangle boundary points summary: triangles with 0 boundary points={trianglesWith0BoundaryPoints}, triangles with 1 boundary point={trianglesWith1BoundaryPoint}, triangles with 2 boundary points={trianglesWith2BoundaryPoints}, triangles with 3 boundary points={trianglesWith3BoundaryPoints}, triangles with 4 boundary points={trianglesWith4BoundaryPoints}, triangles with 5+ boundary points={trianglesWith5OrMoreBoundaryPoints}, max boundary points on triangle={maxBoundaryPointsOnTriangle}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Zero-boundary sampling summary: zero-boundary keep count={stats.zeroBoundaryKeepCount}, zero-boundary delete count={stats.zeroBoundaryDeleteCount}, centroid-only deleted count={stats.centroidOnlyDeletedCount}, zero-boundary mixed keep count={stats.zeroBoundaryMixedKeepCount}, zero-boundary mixed delete count={stats.zeroBoundaryMixedDeleteCount}");
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Two-boundary summary: two-boundary processed count={stats.twoBoundaryProcessedCount}, two-boundary kept region count={stats.twoBoundaryKeptRegionCount}, two-boundary generated triangles count={stats.twoBoundaryGeneratedTrianglesCount}, two-boundary fallback count={stats.twoBoundaryFallbackCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Four-plus-boundary fallback summary: four-plus-boundary fallback count={stats.fourPlusBoundaryFallbackCount}, four-plus-boundary keep count={stats.fourPlusBoundaryKeepCount}, four-plus-boundary delete count={stats.fourPlusBoundaryDeleteCount}");
         return stats;
+    }
+
+    private static int CountExpandedInsideSamples(
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        Vector2 uv0,
+        Vector2 uv1,
+        Vector2 uv2,
+        bool in0,
+        bool in1,
+        bool in2,
+        bool centroidIn)
+    {
+        bool s01025In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv0, uv1, 0.25f));
+        bool s01050In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv0, uv1, 0.5f));
+        bool s01075In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv0, uv1, 0.75f));
+        bool s12025In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv1, uv2, 0.25f));
+        bool s12050In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv1, uv2, 0.5f));
+        bool s12075In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv1, uv2, 0.75f));
+        bool s20025In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv2, uv0, 0.25f));
+        bool s20050In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv2, uv0, 0.5f));
+        bool s20075In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv2, uv0, 0.75f));
+
+        return
+            (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0) +
+            (s01025In ? 1 : 0) + (s01050In ? 1 : 0) + (s01075In ? 1 : 0) +
+            (s12025In ? 1 : 0) + (s12050In ? 1 : 0) + (s12075In ? 1 : 0) +
+            (s20025In ? 1 : 0) + (s20050In ? 1 : 0) + (s20075In ? 1 : 0) +
+            (centroidIn ? 1 : 0);
     }
 
     private static List<BoundaryPoint> CollectBoundaryPointsForTriangle(
