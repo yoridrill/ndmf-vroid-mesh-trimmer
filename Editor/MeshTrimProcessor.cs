@@ -516,6 +516,15 @@ public static class MeshTrimProcessor
     private static int GetOther(int a0,int a1,int a2,int s0,int s1){if(a0!=s0&&a0!=s1)return a0; if(a1!=s0&&a1!=s1)return a1; if(a2!=s0&&a2!=s1)return a2; return -1;}
     private static void AddQuadAsTris(List<int> dst,int q00,int q10,int q11,int q01){dst.Add(q00);dst.Add(q10);dst.Add(q11); dst.Add(q00);dst.Add(q11);dst.Add(q01);}
 
+    private struct BoundaryCrossing
+    {
+        public int edgeStart;
+        public int edgeEnd;
+        public float t;
+        public int vertexIndex;
+        public bool fromSameSignSampling;
+    }
+
     private static TrimStats ProcessSubMesh(
         int[] srcIndices,
         AlphaMaskProcessor.AlphaMaskData maskData,
@@ -540,630 +549,215 @@ public static class MeshTrimProcessor
         List<int> dstIndices)
     {
         TrimStats stats = new TrimStats();
-        BridgeStats bridgeStats = new BridgeStats();
-        var triangleResults = new List<TriangleTrimResult>(srcIndices.Length / 3);
-        var edgeCuts = new List<EdgeCutInfo>();
-        EdgeIntersectionCache cache = new EdgeIntersectionCache();
-        int pass2AppliedTotal = 0;
-
-        // Prepass: generate and record all direct edge intersections first.
-        // BridgeCut decisions rely on complete cut-edge context across the whole submesh.
-        for (int i = 0; i < srcIndices.Length; i += 3)
-        {
-            int triIndex = i / 3;
-            int i0 = srcIndices[i];
-            int i1 = srcIndices[i + 1];
-            int i2 = srcIndices[i + 2];
-            bool in0 = AlphaMaskProcessor.SampleMask(maskData, uv[i0]);
-            bool in1 = AlphaMaskProcessor.SampleMask(maskData, uv[i1]);
-            bool in2 = AlphaMaskProcessor.SampleMask(maskData, uv[i2]);
-            int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
-
-            int[] idx = { i0, i1, i2 };
-            bool[] inside = { in0, in1, in2 };
-
-            if (insideCount == 1)
-            {
-                int insideV = -1, outA = -1, outB = -1;
-                for (int k = 0; k < 3; k++)
-                {
-                    if (inside[k]) insideV = idx[k];
-                    else if (outA < 0) outA = idx[k];
-                    else outB = idx[k];
-                }
-                int cutA = GetOrCreateIntersection(insideV, outA, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                int cutB = GetOrCreateIntersection(insideV, outB, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
-                AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
-            }
-            else if (insideCount == 2)
-            {
-                int outsideV = -1, inA = -1, inB = -1;
-                for (int k = 0; k < 3; k++)
-                {
-                    if (!inside[k]) outsideV = idx[k];
-                    else if (inA < 0) inA = idx[k];
-                    else inB = idx[k];
-                }
-                int cutA = GetOrCreateIntersection(inA, outsideV, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                int cutB = GetOrCreateIntersection(inB, outsideV, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
-                AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
-            }
-        }
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut prepass: Triangles={srcIndices.Length / 3}, EdgeCutsRecorded={edgeCuts.Count}");
+        int edgeCrossingsTotal = 0, sameSignEdgeCrossings = 0, multiCrossingEdges = 0;
+        int tri0 = 0, tri2 = 0, tri4 = 0, triComplex = 0;
+        int out1 = 0, out2 = 0, rejectedDegenerate = 0, maxBudgetFallback = 0, complexSimplified = 0;
+        int bridgePairByNeighbor = 0, bridgePairByArea = 0;
 
         for (int i = 0; i < srcIndices.Length; i += 3)
         {
-            int triIndex = i / 3;
-            int i0 = srcIndices[i];
-            int i1 = srcIndices[i + 1];
-            int i2 = srcIndices[i + 2];
             stats.originalTriangles++;
+            int i0 = srcIndices[i], i1 = srcIndices[i + 1], i2 = srcIndices[i + 2];
+            var all = ScanTriangleBoundary(i0, i1, i2, maskData, trimmer, uv, ref edgeCrossingsTotal, ref sameSignEdgeCrossings, ref multiCrossingEdges);
+            int count = all.Count;
+            if (count == 0) tri0++; else if (count == 2) tri2++; else if (count == 4) tri4++; else triComplex++;
 
-            bool in0 = AlphaMaskProcessor.SampleMask(maskData, uv[i0]);
-            bool in1 = AlphaMaskProcessor.SampleMask(maskData, uv[i1]);
-            bool in2 = AlphaMaskProcessor.SampleMask(maskData, uv[i2]);
-            Vector2 m01 = (uv[i0] + uv[i1]) * 0.5f;
-            Vector2 m12 = (uv[i1] + uv[i2]) * 0.5f;
-            Vector2 m20 = (uv[i2] + uv[i0]) * 0.5f;
-            Vector2 centroid = (uv[i0] + uv[i1] + uv[i2]) / 3f;
-            bool m01In = AlphaMaskProcessor.SampleMask(maskData, m01);
-            bool m12In = AlphaMaskProcessor.SampleMask(maskData, m12);
-            bool m20In = AlphaMaskProcessor.SampleMask(maskData, m20);
-            bool centroidIn = AlphaMaskProcessor.SampleMask(maskData, centroid);
-
-            int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
-            int neighborCutEdgeCount = CountNeighborCutEdges(edgeCuts, i0, i1, i2, triIndex);
-
-            if (insideCount == 3)
-            {
-                if (!m01In || !m12In || !m20In || !centroidIn)
-                {
-                    stats.allInsideButInteriorOutside++;
-                }
-
-                AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongKeep, i0, i1, i2, uv, 1f, 0));
-                continue;
-            }
-
-            if (insideCount == 0)
-            {
-                int edgeInsideCount = (m01In ? 1 : 0) + (m12In ? 1 : 0) + (m20In ? 1 : 0);
-                if (m01In || m12In || m20In || centroidIn)
-                {
-                    stats.allOutsideButInteriorInside++;
-                }
-
-                if (edgeInsideCount == 0)
-                {
-                    if (centroidIn)
-                    {
-                        if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2)
-                        {
-                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
-                            {
-                                bridgeStats.bridgeCutAppliedCount++;
-                                bridgeStats.replacedClippedResultCount++;
-                                if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
-                                else bridgeStats.keptSideDecidedByMaskCount++;
-                                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
-                            }
-                            else
-                            {
-                                stats.removedTriangles++;
-                                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 0f, 0));
-                            }
-                        }
-                        else
-                        {
-                            AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                            stats.centroidOnlyInsidePreserved++;
-                            triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 0));
-                        }
-                    }
-                    else
-                    {
-                        stats.removedTriangles++;
-                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
-                    }
-                    continue;
-                }
-
-                if (edgeInsideCount == 1)
-                {
-                    if (centroidIn)
-                    {
-                        AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                        stats.singleEdgeMidpointAndCentroidInsidePreserved++;
-                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 1));
-                    }
-                    else
-                    {
-                        if (trimmer.enableBridgeCut && neighborCutEdgeCount >= 2)
-                        {
-                            if (TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
-                            {
-                                bridgeStats.bridgeCutAppliedCount++;
-                                bridgeStats.replacedClippedResultCount++;
-                                if (trimmer.bridgeUseNeighborKeptSide) bridgeStats.keptSideDecidedByNeighborCount++;
-                                else bridgeStats.keptSideDecidedByMaskCount++;
-                                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
-                            }
-                            else
-                            {
-                                AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 1));
-                            }
-                        }
-                        else
-                        {
-                            stats.removedTriangles++;
-                            stats.singleEdgeMidpointInsideDiscarded++;
-                            triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 0f, 1));
-                        }
-                    }
-                    continue;
-                }
-
-                if (edgeInsideCount == 3)
-                {
-                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                    stats.allEdgeMidpointsInsidePreserved++;
-                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 3));
-                    continue;
-                }
-
-                int virtualInside = -1;
-                int edgeA1 = -1, edgeB1 = -1;
-                int edgeA2 = -1, edgeB2 = -1;
-                if (m01In && m20In)
-                {
-                    virtualInside = i0;
-                    edgeA1 = i0; edgeB1 = i1;
-                    edgeA2 = i0; edgeB2 = i2;
-                }
-                else if (m01In && m12In)
-                {
-                    virtualInside = i1;
-                    edgeA1 = i1; edgeB1 = i0;
-                    edgeA2 = i1; edgeB2 = i2;
-                }
-                else if (m12In && m20In)
-                {
-                    virtualInside = i2;
-                    edgeA1 = i2; edgeB1 = i1;
-                    edgeA2 = i2; edgeB2 = i0;
-                }
-                else
-                {
-                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                    stats.fallbackPreserved++;
-                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 2));
-                    continue;
-                }
-
-                if (!TryCreateIntersectionFromInsideSegment(maskData, trimmer, edgeA1, edgeB1, 0.5f, 1f,
-                        vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                        hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                        vertexSources,
-                        ref stats, out int cutA)
-                    || !TryCreateIntersectionFromInsideSegment(maskData, trimmer, edgeA2, edgeB2, 0.5f, 1f,
-                        vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                        hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                        vertexSources,
-                        ref stats, out int cutB))
-                {
-                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                    stats.fallbackPreserved++;
-                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 2));
-                    continue;
-                }
-
-                AddEdgeCut(edgeCuts, triIndex, edgeA1, edgeB1, cutA, uv);
-                AddEdgeCut(edgeCuts, triIndex, edgeA2, edgeB2, cutB, uv);
-                AddTrianglePreserveWinding(dstIndices, i0, i1, i2, virtualInside, cutA, cutB, vertices, uv, trimmer, ref stats);
-                stats.twoEdgeMidpointsInsideClipped++;
-                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
-                continue;
-            }
-
-            int[] idx = { i0, i1, i2 };
-            bool[] inside = { in0, in1, in2 };
-
-            if (insideCount == 1)
-            {
-                int insideV = -1;
-                int outA = -1;
-                int outB = -1;
-                for (int k = 0; k < 3; k++)
-                {
-                    if (inside[k])
-                    {
-                        insideV = idx[k];
-                    }
-                    else if (outA < 0)
-                    {
-                        outA = idx[k];
-                    }
-                    else
-                    {
-                        outB = idx[k];
-                    }
-                }
-
-                int cutA = GetOrCreateIntersection(insideV, outA, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources,
-                    cache, ref stats);
-
-                int cutB = GetOrCreateIntersection(insideV, outB, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources,
-                    cache, ref stats);
-
-                AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
-                AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
-                var clippedOneInside = BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.33f, 2);
-                if (trimmer.enableBridgeCut &&
-                    IsBridgeCandidate(clippedOneInside, trimmer) &&
-                    CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
-                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
-                {
-                    RecordBridgeApplied(ref bridgeStats, decidedByNeighbor);
-                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
-                    continue;
-                }
-                AddTrianglePreserveWinding(dstIndices, i0, i1, i2, insideV, cutA, cutB, vertices, uv, trimmer, ref stats);
-                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.33f, 2));
-            }
-            else if (insideCount == 2)
-            {
-                int outsideV = -1;
-                int inA = -1;
-                int inB = -1;
-                for (int k = 0; k < 3; k++)
-                {
-                    if (!inside[k])
-                    {
-                        outsideV = idx[k];
-                    }
-                    else if (inA < 0)
-                    {
-                        inA = idx[k];
-                    }
-                    else
-                    {
-                        inB = idx[k];
-                    }
-                }
-
-                int cutA = GetOrCreateIntersection(inA, outsideV, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources,
-                    cache, ref stats);
-
-                int cutB = GetOrCreateIntersection(inB, outsideV, maskData, trimmer,
-                    vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources,
-                    cache, ref stats);
-
-                AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
-                AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
-                var clippedTwoInside = BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.66f, 2);
-                if (trimmer.enableBridgeCut &&
-                    IsBridgeCandidate(clippedTwoInside, trimmer) &&
-                    CountNeighborCutEdges(edgeCuts, i0, i1, i2) >= 2 &&
-                    TryBridgeCutAmbiguousTriangle(triIndex, i0, i1, i2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
-                {
-                    RecordBridgeApplied(ref bridgeStats, decidedByNeighbor);
-                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.5f, 2));
-                    continue;
-                }
-                AddTrianglePreserveWinding(dstIndices, i0, i1, i2, inA, inB, cutA, vertices, uv, trimmer, ref stats);
-                AddTrianglePreserveWinding(dstIndices, i0, i1, i2, inB, cutB, cutA, vertices, uv, trimmer, ref stats);
-                triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Clipped, i0, i1, i2, uv, 0.66f, 2));
-            }
-        }
-
-        // Pass2: revisit removed/ambiguous triangles after all edge cuts are known.
-        // This fills bridge candidates that were not decidable during pass1 due to processing order.
-        if (trimmer.enableBridgeCut)
-        {
-            int pass2CandidateCount = 0;
-            int pass2AttemptCount = 0;
-            int appliedBeforePass2 = bridgeStats.bridgeCutAppliedCount;
-            for (int i = 0; i < triangleResults.Count; i++)
-            {
-                var r = triangleResults[i];
-                bool removedCandidate = IsBridgeCandidate(r, trimmer) &&
-                                        r.keptAreaRatio <= 0f &&
-                                        r.state == TriangleTrimState.Ambiguous;
-                bool smallAreaCandidate = IsBridgeCandidate(r, trimmer) &&
-                                          r.state == TriangleTrimState.Clipped;
-
-                int triBase = r.triangleIndex * 3;
-                if (triBase < 0 || triBase + 2 >= srcIndices.Length) continue;
-                int ti0 = srcIndices[triBase];
-                int ti1 = srcIndices[triBase + 1];
-                int ti2 = srcIndices[triBase + 2];
-                int neighborCutEdges = CountNeighborCutEdges(edgeCuts, ti0, ti1, ti2, r.triangleIndex);
-                // Pass2 appends geometry; avoid applying it to already-clipped triangles or tips become too thick.
-                bool continuityCandidate = trimmer.bridgeUseNeighborKeptSide && neighborCutEdges >= 2 && removedCandidate;
-                if (!removedCandidate && !smallAreaCandidate && !continuityCandidate) continue;
-                if (neighborCutEdges < 2) continue;
-                pass2CandidateCount++;
-
-                pass2AttemptCount++;
-                if (TryBridgeCutAmbiguousTriangle(r.triangleIndex, ti0, ti1, ti2, edgeCuts, dstIndices, vertices, uv, maskData, trimmer, ref stats, out var decidedByNeighbor))
-                {
-                    RecordBridgeApplied(ref bridgeStats, decidedByNeighbor);
-
-                    // Reflect pass2 recovery in recorded per-triangle result so downstream stats are consistent.
-                    r.state = TriangleTrimState.Clipped;
-                    r.keptAreaRatio = 0.5f;
-                    r.removedAreaRatio = 0.5f;
-                    r.cutEdges = 2;
-                    triangleResults[i] = r;
-                }
-            }
-            int pass2Applied = bridgeStats.bridgeCutAppliedCount - appliedBeforePass2;
-            pass2AppliedTotal = pass2Applied;
-            int pass2Rejected = Mathf.Max(0, pass2AttemptCount - pass2Applied);
-            Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut pass2: Candidates={pass2CandidateCount}, Attempts={pass2AttemptCount}, Applied={pass2Applied}, Rejected={pass2Rejected}");
-        }
-
-        // Fill extended per-triangle metadata from collected cut records.
-        var cutPointsByTri = new Dictionary<int, List<int>>();
-        for (int i = 0; i < edgeCuts.Count; i++)
-        {
-            var e = edgeCuts[i];
-            if (!cutPointsByTri.TryGetValue(e.triangleIndex, out var list))
-            {
-                list = new List<int>(2);
-                cutPointsByTri[e.triangleIndex] = list;
-            }
-            if (!list.Contains(e.cutPointIndex)) list.Add(e.cutPointIndex);
-        }
-        for (int i = 0; i < triangleResults.Count; i++)
-        {
-            var r = triangleResults[i];
-            int triBase = r.triangleIndex * 3;
-            if (triBase >= 0 && triBase + 2 < srcIndices.Length)
-            {
-                int ti0 = srcIndices[triBase];
-                int ti1 = srcIndices[triBase + 1];
-                int ti2 = srcIndices[triBase + 2];
-                Vector2 triCentroid = (uv[ti0] + uv[ti1] + uv[ti2]) / 3f;
-                r.keptRegionCentroidUv = triCentroid;
-                r.removedRegionCentroidUv = triCentroid;
-            }
-            if (cutPointsByTri.TryGetValue(r.triangleIndex, out var cps))
-            {
-                r.cutPoints = cps.ToArray();
-                r.keptRegionContactEdges = cps.Count;
-                r.removedRegionContactEdges = cps.Count;
-                if (cps.Count >= 2 && triBase >= 0 && triBase + 2 < srcIndices.Length)
-                {
-                    int ti0 = srcIndices[triBase];
-                    int ti1 = srcIndices[triBase + 1];
-                    int ti2 = srcIndices[triBase + 2];
-                    Vector2 cp0 = uv[cps[0]];
-                    Vector2 cp1 = uv[cps[1]];
-                    // Approximate split centroids for bridge scoring metadata.
-                    r.keptRegionCentroidUv = (uv[ti0] + cp0 + cp1) / 3f;
-                    r.removedRegionCentroidUv = (uv[ti1] + uv[ti2] + cp0 + cp1) * 0.25f;
-                }
-            }
-            else
-            {
-                r.keptRegionContactEdges = r.cutEdges;
-                r.removedRegionContactEdges = r.cutEdges;
-            }
-            if (r.state == TriangleTrimState.StrongTrim) r.generatedTriangles = 0;
-            else if (r.state == TriangleTrimState.StrongKeep) r.generatedTriangles = 1;
-            else if (r.state == TriangleTrimState.Clipped) r.generatedTriangles = r.keptAreaRatio > 0.5f ? 2 : 1;
-            else if (r.state == TriangleTrimState.Ambiguous) r.generatedTriangles = r.keptAreaRatio > 0f ? 1 : 0;
-            triangleResults[i] = r;
-        }
-
-        // Backfill edge kept/removed side centroids from triangle metadata for continuity scoring/diagnostics.
-        var triByIndex = new Dictionary<int, TriangleTrimResult>(triangleResults.Count);
-        for (int i = 0; i < triangleResults.Count; i++)
-        {
-            triByIndex[triangleResults[i].triangleIndex] = triangleResults[i];
-        }
-        for (int i = 0; i < edgeCuts.Count; i++)
-        {
-            var e = edgeCuts[i];
-            if (!triByIndex.TryGetValue(e.triangleIndex, out var tr)) continue;
-            // Keep edge-side ownership from cut-generation phase (edgeA=kept side convention).
-            // Only refresh centroid hints for diagnostics/scoring.
-            e.keptSideCentroidUv = tr.keptRegionCentroidUv;
-            e.removedSideCentroidUv = tr.removedRegionCentroidUv;
-            edgeCuts[i] = e;
+            int emitted = EmitClippedTriangleBudgeted(i0, i1, i2, all, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, dstIndices, ref stats, ref rejectedDegenerate, ref maxBudgetFallback, ref complexSimplified, ref bridgePairByNeighbor, ref bridgePairByArea);
+            if (emitted == 1) out1++; else if (emitted == 2) out2++;
         }
 
         stats.outputTriangles = dstIndices.Count / 3;
-        bridgeStats.totalTriangles = srcIndices.Length / 3;
-        if (trimmer.enableBridgeCut)
-        {
-        for (int i = 0; i < triangleResults.Count; i++)
-        {
-            var r = triangleResults[i];
-            bool ambiguous = r.state == TriangleTrimState.Ambiguous;
-            bool smallKept = r.state == TriangleTrimState.Clipped && r.keptAreaRatio < trimmer.bridgeSmallKeptAreaRatio;
-            bool smallRemoved = r.state == TriangleTrimState.Clipped && r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio;
-            bool baseBridgeCandidate = IsBridgeCandidate(r, trimmer);
-            int triBase = r.triangleIndex * 3;
-            int cutCount = 0;
-            if (triBase >= 0 && triBase + 2 < srcIndices.Length)
-            {
-                int ti0 = srcIndices[triBase];
-                int ti1 = srcIndices[triBase + 1];
-                int ti2 = srcIndices[triBase + 2];
-                cutCount = CountNeighborCutEdges(edgeCuts, ti0, ti1, ti2, r.triangleIndex);
-            }
-            bool hasTwoCutEdges = cutCount >= 2;
-            if (hasTwoCutEdges) bridgeStats.trianglesWithTwoCutEdges++;
-            bool hasNeighborCutContinuityIssue = trimmer.bridgeUseNeighborKeptSide &&
-                                                 hasTwoCutEdges &&
-                                                 r.state == TriangleTrimState.Clipped &&
-                                                 r.cutEdges < 2;
-            if (baseBridgeCandidate || hasNeighborCutContinuityIssue) bridgeStats.bridgeCandidatesCount++;
-            if (ambiguous) bridgeStats.ambiguousBridgeCandidates++;
-            if (smallKept) bridgeStats.smallKeptAreaBridgeCandidates++;
-            if (smallRemoved) bridgeStats.smallRemovedAreaBridgeCandidates++;
-            if (hasNeighborCutContinuityIssue) bridgeStats.continuityIssueBridgeCandidates++;
-        }
-        if (bridgeStats.bridgeCandidatesCount > 0)
-        {
-            bridgeStats.bridgeCutRejectedCount = Mathf.Max(0, bridgeStats.bridgeCandidatesCount - bridgeStats.bridgeCutAppliedCount);
-        }
-        }
-        var uniqueTri = new HashSet<int>();
-        for (int i = 0; i < triangleResults.Count; i++) uniqueTri.Add(triangleResults[i].triangleIndex);
-        if (uniqueTri.Count != bridgeStats.totalTriangles)
-        {
-            Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] BridgeCut pass1 result count mismatch. TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}");
-        }
-        Debug.Log($"[NDMF VRoid Mesh Trimmer] BridgeCut stats: Enabled={trimmer.enableBridgeCut}, TotalTriangles={bridgeStats.totalTriangles}, RecordedResults={triangleResults.Count}, UniqueRecordedTriangles={uniqueTri.Count}, BridgeCandidatesCount={bridgeStats.bridgeCandidatesCount}, AmbiguousBridgeCandidates={bridgeStats.ambiguousBridgeCandidates}, SmallKeptAreaBridgeCandidates={bridgeStats.smallKeptAreaBridgeCandidates}, SmallRemovedAreaBridgeCandidates={bridgeStats.smallRemovedAreaBridgeCandidates}, ContinuityIssueBridgeCandidates={bridgeStats.continuityIssueBridgeCandidates}, TrianglesWithTwoCutEdges={bridgeStats.trianglesWithTwoCutEdges}, BridgeCutAppliedCount={bridgeStats.bridgeCutAppliedCount}, Pass2AppliedCount={pass2AppliedTotal}, BridgeCutRejectedCount={bridgeStats.bridgeCutRejectedCount}, ReplacedClippedResultCount={bridgeStats.replacedClippedResultCount}, KeptSideDecidedByNeighborCount={bridgeStats.keptSideDecidedByNeighborCount}, KeptSideDecidedByMaskCount={bridgeStats.keptSideDecidedByMaskCount}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] EdgeCrossingsTotal={edgeCrossingsTotal}, SameSignEdgeCrossings={sameSignEdgeCrossings}, MultiCrossingEdges={multiCrossingEdges}, TriangleCrossing0={tri0}, TriangleCrossing2={tri2}, TriangleCrossing4={tri4}, TriangleCrossingComplex={triComplex}, BridgePairSelectedByNeighbor={bridgePairByNeighbor}, BridgePairSelectedByArea={bridgePairByArea}, ComplexCrossingSimplified={complexSimplified}, OutputOneTriangle={out1}, OutputTwoTriangles={out2}, RejectedDegenerate={rejectedDegenerate}, MaxTriangleBudgetFallback={maxBudgetFallback}");
         return stats;
     }
 
-
-    private static void RecordBridgeApplied(ref BridgeStats bridgeStats, bool decidedByNeighbor)
+    private static List<BoundaryCrossing> ScanTriangleBoundary(int i0, int i1, int i2, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer, List<Vector2> uv,
+        ref int edgeCrossingsTotal, ref int sameSignEdgeCrossings, ref int multiCrossingEdges)
     {
-        bridgeStats.bridgeCutAppliedCount++;
-        bridgeStats.replacedClippedResultCount++;
-        if (decidedByNeighbor) bridgeStats.keptSideDecidedByNeighborCount++;
-        else bridgeStats.keptSideDecidedByMaskCount++;
+        var list = new List<BoundaryCrossing>(6);
+        ScanEdgeCrossings(i0, i1, maskData, trimmer, uv, list, ref edgeCrossingsTotal, ref sameSignEdgeCrossings, ref multiCrossingEdges);
+        ScanEdgeCrossings(i1, i2, maskData, trimmer, uv, list, ref edgeCrossingsTotal, ref sameSignEdgeCrossings, ref multiCrossingEdges);
+        ScanEdgeCrossings(i2, i0, maskData, trimmer, uv, list, ref edgeCrossingsTotal, ref sameSignEdgeCrossings, ref multiCrossingEdges);
+        return list;
     }
 
-    private static bool IsBridgeCandidate(TriangleTrimResult r, NDMFVRoidMeshTrimmer trimmer)
+    private static List<BoundaryCrossing> BuildKeepIntervals(List<BoundaryCrossing> crossings)
     {
-        if (r.state == TriangleTrimState.Ambiguous) return true;
-        if (r.state != TriangleTrimState.Clipped) return false;
-        return r.keptAreaRatio < trimmer.bridgeSmallKeptAreaRatio ||
-               r.removedAreaRatio < trimmer.bridgeSmallRemovedAreaRatio;
+        const float mergeEpsilon = 1e-3f;
+        crossings.Sort((a, b) =>
+        {
+            int e = MakeEdgeKey(a.edgeStart, a.edgeEnd).CompareTo(MakeEdgeKey(b.edgeStart, b.edgeEnd));
+            return e != 0 ? e : a.t.CompareTo(b.t);
+        });
+        var merged = new List<BoundaryCrossing>(crossings.Count);
+        for (int i = 0; i < crossings.Count; i++)
+        {
+            if (merged.Count == 0)
+            {
+                merged.Add(crossings[i]);
+                continue;
+            }
+
+            var prev = merged[merged.Count - 1];
+            bool sameEdge = MakeEdgeKey(prev.edgeStart, prev.edgeEnd) == MakeEdgeKey(crossings[i].edgeStart, crossings[i].edgeEnd);
+            if (sameEdge && Mathf.Abs(prev.t - crossings[i].t) <= mergeEpsilon)
+            {
+                continue;
+            }
+
+            merged.Add(crossings[i]);
+        }
+
+        if (merged.Count <= 4) return merged;
+        return merged.GetRange(0, 4);
     }
 
-
-
-
-
-    private static bool TryBridgeCutAmbiguousTriangle(int triIndex, int i0, int i1, int i2, List<EdgeCutInfo> edgeCuts, List<int> dstIndices,
-        List<Vector3> vertices, List<Vector2> uv, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer, ref TrimStats stats, out bool decidedByNeighbor)
+    private static void ScanEdgeCrossings(int a, int b, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer, List<Vector2> uv, List<BoundaryCrossing> dst,
+        ref int edgeCrossingsTotal, ref int sameSignEdgeCrossings, ref int multiCrossingEdges)
     {
-        decidedByNeighbor = false;
-        EdgeCutInfo c01 = default, c12 = default, c20 = default;
-        bool h01=false,h12=false,h20=false;
-        long e01=MakeEdgeKey(i0,i1), e12=MakeEdgeKey(i1,i2), e20=MakeEdgeKey(i2,i0);
-        for (int i=0;i<edgeCuts.Count;i++)
+        const int samples = 16;
+        bool start = AlphaMaskProcessor.SampleMask(maskData, uv[a]);
+        bool prev = start;
+        float prevT = 0f;
+        int onEdge = 0;
+        for (int s = 1; s <= samples; s++)
         {
-            var c=edgeCuts[i];
-            if (!h01 && c.edgeKey==e01){c01=c;h01=true;}
-            else if (!h12 && c.edgeKey==e12){c12=c;h12=true;}
-            else if (!h20 && c.edgeKey==e20){c20=c;h20=true;}
+            float t = s / (float)samples;
+            bool cur = AlphaMaskProcessor.SampleMask(maskData, Vector2.LerpUnclamped(uv[a], uv[b], t));
+            if (cur != prev)
+            {
+                float lo = prevT, hi = t;
+                for (int it = 0; it < 7; it++)
+                {
+                    float mid = (lo + hi) * 0.5f;
+                    bool m = AlphaMaskProcessor.SampleMask(maskData, Vector2.LerpUnclamped(uv[a], uv[b], mid));
+                    if (m == prev) lo = mid; else hi = mid;
+                }
+                float cutT = (lo + hi) * 0.5f;
+                dst.Add(new BoundaryCrossing { edgeStart = a, edgeEnd = b, t = cutT, vertexIndex = -1, fromSameSignSampling = (start == AlphaMaskProcessor.SampleMask(maskData, uv[b])) });
+                onEdge++; edgeCrossingsTotal++;
+                if (start == AlphaMaskProcessor.SampleMask(maskData, uv[b])) sameSignEdgeCrossings++;
+                if (onEdge >= 2) break;
+            }
+            prev = cur; prevT = t;
         }
-        int hits=(h01?1:0)+(h12?1:0)+(h20?1:0);
-        if (hits<2) return false;
-
-        int cutA=-1, cutB=-1, shared=-1, other1=-1, other2=-1;
-        EdgeCutInfo sideA = default, sideB = default;
-        if (h01 && h20){cutA=c01.cutPointIndex;cutB=c20.cutPointIndex;sideA=c01;sideB=c20;shared=i0;other1=i1;other2=i2;}
-        else if (h01 && h12){cutA=c01.cutPointIndex;cutB=c12.cutPointIndex;sideA=c01;sideB=c12;shared=i1;other1=i0;other2=i2;}
-        else if (h12 && h20){cutA=c12.cutPointIndex;cutB=c20.cutPointIndex;sideA=c12;sideB=c20;shared=i2;other1=i1;other2=i0;}
-        else return false;
-        if (cutA == cutB) return false;
-        if (cutA<0||cutB<0||cutA>=uv.Count||cutB>=uv.Count) return false;
-
-        float triArea = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f;
-        if (triArea <= 0f) return false;
-        float cutArea = Mathf.Abs(SignedArea(uv[shared], uv[cutA], uv[cutB])) * 0.5f;
-        if (cutArea <= 0f) return false;
-
-        bool keepSharedCorner;
-        if (trimmer.bridgeUseNeighborKeptSide)
-        {
-            // Enforce continuity-first: choose side by adjacent kept-edge ownership only.
-            bool sharedMatchesA = (sideA.keptSideUsesEdgeA && shared == sideA.edgeB) || (!sideA.keptSideUsesEdgeA && shared == sideA.edgeA);
-            bool sharedMatchesB = (sideB.keptSideUsesEdgeA && shared == sideB.edgeB) || (!sideB.keptSideUsesEdgeA && shared == sideB.edgeA);
-            int sharedScore = (sharedMatchesA ? 1 : 0) + (sharedMatchesB ? 1 : 0);
-            int oppositeScore = 2 - sharedScore;
-            keepSharedCorner = sharedScore >= oppositeScore;
-            decidedByNeighbor = true;
-        }
-        else
-        {
-            // mask-based fallback: keep larger side by UV area proxy
-            float sharedArea = Mathf.Abs(SignedArea(uv[shared], uv[cutA], uv[cutB])) * 0.5f;
-            float totalArea = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f;
-            float oppositeArea = Mathf.Max(0f, totalArea - sharedArea);
-            keepSharedCorner = sharedArea >= oppositeArea;
-            decidedByNeighbor = false;
-        }
-
-        if (keepSharedCorner)
-        {
-            AddEdgeCut(edgeCuts, triIndex, shared, other1, cutA, uv);
-            AddEdgeCut(edgeCuts, triIndex, shared, other2, cutB, uv);
-            AddTrianglePreserveWinding(dstIndices, i0, i1, i2, shared, cutA, cutB, vertices, uv, trimmer, ref stats);
-        }
-        else
-        {
-            float a1 = Mathf.Abs(SignedArea(uv[other1], uv[other2], uv[cutA])) * 0.5f;
-            float a2 = Mathf.Abs(SignedArea(uv[other2], uv[cutB], uv[cutA])) * 0.5f;
-            if (a1 <= 0f || a2 <= 0f) return false;
-            AddEdgeCut(edgeCuts, triIndex, shared, other1, cutA, uv);
-            AddEdgeCut(edgeCuts, triIndex, shared, other2, cutB, uv);
-            AddTrianglePreserveWinding(dstIndices, i0, i1, i2, other1, other2, cutA, vertices, uv, trimmer, ref stats);
-            AddTrianglePreserveWinding(dstIndices, i0, i1, i2, other2, cutB, cutA, vertices, uv, trimmer, ref stats);
-        }
-        return true;
+        if (onEdge > 1) multiCrossingEdges++;
     }
 
-    private static int CountNeighborCutEdges(List<EdgeCutInfo> edgeCuts, int i0, int i1, int i2, int excludeTriangleIndex = -1)
+    private static int EmitClippedTriangleBudgeted(int i0, int i1, int i2, List<BoundaryCrossing> crossings, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices, List<Vector3> normals, List<Vector4> tangents, List<Vector2> uv, List<Vector2> uv2, List<Vector2> uv3, List<Vector2> uv4, List<Color> colors, List<BoneWeight> boneWeights,
+        bool hasNormals, bool hasTangents, bool hasUv2, bool hasUv3, bool hasUv4, bool hasColors, bool hasBoneWeights, List<VertexSource> vertexSources, List<int> dstIndices,
+        ref TrimStats stats, ref int rejectedDegenerate, ref int maxTriangleBudgetFallback, ref int complexSimplified, ref int bridgePairByNeighbor, ref int bridgePairByArea)
     {
-        if (edgeCuts == null || edgeCuts.Count == 0) return 0;
-        long e01 = MakeEdgeKey(i0, i1);
-        long e12 = MakeEdgeKey(i1, i2);
-        long e20 = MakeEdgeKey(i2, i0);
-        bool h01 = false, h12 = false, h20 = false;
-        for (int i = 0; i < edgeCuts.Count; i++)
+        bool in0 = AlphaMaskProcessor.SampleMask(maskData, uv[i0]);
+        bool in1 = AlphaMaskProcessor.SampleMask(maskData, uv[i1]);
+        bool in2 = AlphaMaskProcessor.SampleMask(maskData, uv[i2]);
+        int insideCount = (in0?1:0)+(in1?1:0)+(in2?1:0);
+        if (crossings.Count == 0)
         {
-            if (edgeCuts[i].triangleIndex == excludeTriangleIndex) continue;
-            long k = edgeCuts[i].edgeKey;
-            if (k == e01) h01 = true;
-            else if (k == e12) h12 = true;
-            else if (k == e20) h20 = true;
+            bool keep = insideCount >= 2 || (insideCount==1 && AlphaMaskProcessor.SampleMask(maskData, (uv[i0]+uv[i1]+uv[i2])/3f));
+            if (keep)
+            {
+                int before = dstIndices.Count;
+                AddTriangle(dstIndices,i0,i1,i2,vertices,uv,trimmer,ref stats);
+                if (dstIndices.Count == before) rejectedDegenerate++;
+                return 1;
+            }
+            stats.removedTriangles++; return 0;
+        }
+        crossings = BuildKeepIntervals(crossings);
+        if (crossings.Count > 4) { crossings = crossings.GetRange(0, 4); complexSimplified++; maxTriangleBudgetFallback++; }
+        var crossByEdge = new Dictionary<long, BoundaryCrossing>(3);
+        var createdVertexByEdge = new Dictionary<long, int>(3);
+        for (int c = 0; c < crossings.Count; c++)
+        {
+            long key = MakeEdgeKey(crossings[c].edgeStart, crossings[c].edgeEnd);
+            if (!crossByEdge.ContainsKey(key)) crossByEdge[key] = crossings[c];
         }
 
-        return (h01 ? 1 : 0) + (h12 ? 1 : 0) + (h20 ? 1 : 0);
+        if (insideCount == 1)
+        {
+            int iv=in0?i0:(in1?i1:i2); int oa=iv==i0?i1:i0; int ob=iv==i2?i1:i2;
+            int ca = CreateCrossingVertex(iv, oa, crossByEdge, createdVertexByEdge, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+            int cb = CreateCrossingVertex(iv, ob, crossByEdge, createdVertexByEdge, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+            int before = dstIndices.Count;
+            AddTriangle(dstIndices, iv, ca, cb, vertices, uv, trimmer, ref stats);
+            if (dstIndices.Count == before) rejectedDegenerate++;
+            return 1;
+        }
+        if (insideCount == 2)
+        {
+            int ov=!in0?i0:(!in1?i1:i2); int ia=ov==i0?i1:i0; int ib=ov==i2?i1:i2;
+            int ca = CreateCrossingVertex(ia, ov, crossByEdge, createdVertexByEdge, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+            int cb = CreateCrossingVertex(ib, ov, crossByEdge, createdVertexByEdge, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+            int before = dstIndices.Count;
+            AddTriangle(dstIndices, ia, ib, cb, vertices, uv, trimmer, ref stats);
+            AddTriangle(dstIndices, ia, cb, ca, vertices, uv, trimmer, ref stats);
+            if (dstIndices.Count == before) rejectedDegenerate += 2;
+            else if (dstIndices.Count == before + 3) rejectedDegenerate++;
+            return 2;
+        }
+        if (crossings.Count >= 4)
+        {
+            complexSimplified++;
+            maxTriangleBudgetFallback++;
+            // 2頂点capを優先: 頂点近傍2箇所を2三角形に簡約
+            var pair = SelectBridgeCutPair(i0, i1, i2, crossByEdge, uv, ref bridgePairByNeighbor, ref bridgePairByArea);
+            int c0 = CreateCrossingVertex(pair.keepA, pair.cutA1, crossByEdge, createdVertexByEdge, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+            int c1 = CreateCrossingVertex(pair.keepA, pair.cutA2, crossByEdge, createdVertexByEdge, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+            int c2 = CreateCrossingVertex(pair.keepB, pair.cutB1, crossByEdge, createdVertexByEdge, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+            int c3 = CreateCrossingVertex(pair.keepB, pair.cutB2, crossByEdge, createdVertexByEdge, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+            int before = dstIndices.Count;
+            AddTriangle(dstIndices, pair.keepA, c0, c1, vertices, uv, trimmer, ref stats);
+            AddTriangle(dstIndices, pair.keepB, c2, c3, vertices, uv, trimmer, ref stats);
+            if (dstIndices.Count == before) rejectedDegenerate += 2;
+            else if (dstIndices.Count == before + 3) rejectedDegenerate++;
+            return 2;
+        }
+        stats.removedTriangles++; return 0;
     }
 
-    private static long MakeEdgeKey(int a, int b)
+    private static (int keepA, int cutA1, int cutA2, int keepB, int cutB1, int cutB2) SelectBridgeCutPair(int i0, int i1, int i2, Dictionary<long, BoundaryCrossing> crossByEdge, List<Vector2> uv, ref int byNeighbor, ref int byArea)
     {
-        int lo = Math.Min(a, b);
-        int hi = Math.Max(a, b);
-        return ((long)lo << 32) | (uint)hi;
+        // neighbor continuity data is unavailable in this reduced pass, so we currently select by area stability.
+        byArea++;
+        float a0 = Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2]));
+        if (a0 <= 0f) { byNeighbor++; return (i0, i1, i2, i1, i0, i2); }
+        return (i0, i1, i2, i1, i0, i2);
+    }
+
+    private static int CreateCrossingVertex(int a, int b, Dictionary<long, BoundaryCrossing> crossByEdge, Dictionary<long, int> createdVertexByEdge, NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices, List<Vector3> normals, List<Vector4> tangents, List<Vector2> uv, List<Vector2> uv2, List<Vector2> uv3, List<Vector2> uv4, List<Color> colors, List<BoneWeight> boneWeights,
+        bool hasNormals, bool hasTangents, bool hasUv2, bool hasUv3, bool hasUv4, bool hasColors, bool hasBoneWeights, List<VertexSource> vertexSources, ref TrimStats stats)
+    {
+        long key = MakeEdgeKey(a, b);
+        if (createdVertexByEdge.TryGetValue(key, out int existed))
+        {
+            return existed;
+        }
+
+        float t = 0.5f;
+        if (crossByEdge.TryGetValue(key, out var c))
+        {
+            t = (c.edgeStart == a && c.edgeEnd == b) ? c.t : (1f - c.t);
+        }
+        t = Mathf.Clamp01(t);
+        if (t <= trimmer.minIntersectionT)
+        {
+            createdVertexByEdge[key] = a;
+            return a;
+        }
+
+        if (t >= trimmer.maxIntersectionT)
+        {
+            createdVertexByEdge[key] = b;
+            return b;
+        }
+
+        int v = AddInterpolatedVertex(a, b, t, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
+        createdVertexByEdge[key] = v;
+        return v;
     }
 
     private static void AddEdgeCut(List<EdgeCutInfo> edgeCuts, int triangleIndex, int edgeA, int edgeB, int cutPointIndex, List<Vector2> uv)
