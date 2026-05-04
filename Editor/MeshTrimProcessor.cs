@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -654,10 +655,6 @@ public static class MeshTrimProcessor
             bool in1 = AlphaMaskProcessor.SampleMask(maskData, uv[i1]);
             bool in2 = AlphaMaskProcessor.SampleMask(maskData, uv[i2]);
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
-            if (boundaryPointsDetected == 4 && insideCount != 0)
-            {
-                stats.optionalTwoLineRescueSkippedBecauseLegacyNotTrimCount++;
-            }
 
             int[] idx = { i0, i1, i2 };
             bool[] inside = { in0, in1, in2 };
@@ -762,6 +759,10 @@ public static class MeshTrimProcessor
             }
 
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
+            if (boundaryPointsDetected == 4 && insideCount != 0)
+            {
+                stats.optionalTwoLineRescueSkippedBecauseLegacyNotTrimCount++;
+            }
 
             // BoundaryPoint-based output branches are intentionally disabled in this stage.
 
