@@ -1,10 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.Rendering;
 
 public static class MeshTrimProcessor
 {
+    private class FourPointDebugCandidate
+    {
+        public float suspicion;
+        public string logBlock;
+    }
     public struct VertexSource
     {
         public int index0; public float weight0;
@@ -16,6 +22,15 @@ public static class MeshTrimProcessor
         {
             return new VertexSource { index0 = originalIndex, weight0 = 1f, index1 = -1, index2 = -1, index3 = -1 };
         }
+    }
+
+    public struct VertexData
+    {
+        public Vector3 position;
+        public Vector3 normal;
+        public Vector4 tangent;
+        public Color color;
+        public BoneWeight boneWeight;
     }
 
     private class SubMeshTask
@@ -54,6 +69,16 @@ public static class MeshTrimProcessor
         public int generatedTriangles;
     }
 
+    private struct BoundaryPoint
+    {
+        public int edgeIndex;
+        public float localTOnEdge;
+        public EdgeCrossing crossing;
+        public int vertexIndex;
+        public Vector2 uv;
+        public float perimeterOrder;
+    }
+
     private struct EdgeCutInfo
     {
         public long edgeKey;
@@ -82,6 +107,65 @@ public static class MeshTrimProcessor
         public int twoEdgeMidpointsInsideClipped;
         public int allEdgeMidpointsInsidePreserved;
         public int fallbackPreserved;
+        public int trianglesWithFourOrMoreBoundaryPoints;
+        public int zeroBoundaryKeepCount;
+        public int zeroBoundaryDeleteCount;
+        public int centroidOnlyDeletedCount;
+        public int zeroBoundaryMixedKeepCount;
+        public int zeroBoundaryMixedDeleteCount;
+        public int twoBoundaryProcessedCount;
+        public int twoBoundaryKeptRegionCount;
+        public int twoBoundaryGeneratedTrianglesCount;
+        public int twoBoundaryFallbackCount;
+        public int fourPlusBoundaryFallbackCount;
+        public int fourPlusBoundaryKeepCount;
+        public int fourPlusBoundaryDeleteCount;
+        public int fourPointClipSuccessCount;
+        public int fourPointClipFallbackCount;
+        public int fourPointClipGeneratedTriangles;
+        public int fourPointClipGeneratedZeroFallbackCount;
+        public int fourPointGeneratedTriangleInsideCount;
+        public int fourPointGeneratedTriangleOutsideCount;
+        public int fourPointReversedSideSuspectedCount;
+        public int fourPointFallbackDueToInvalidSampleCount;
+        public int fourPointPairingCandidatesTestedCount;
+        public int fourPointPairingASelectedCount;
+        public int fourPointPairingBSelectedCount;
+        public int fourPointPairingCSelectedCount;
+        public int fourPointPairingRejectedByIntersectionCount;
+        public int fourPointPairingRejectedBySameEdgeLineCount;
+        public int fourPointPairingRejectedByDegenerateCount;
+        public int fourPointPairingFallbackCount;
+        public float fourPointBestScore;
+        public int fourPointGeneratedTrianglesCount;
+        public int fourPointKeptTrianglesCount;
+        public int fourPointDiscardedTrianglesCount;
+        public int twoEdgeTwoCrossingsDetectedCount;
+        public int twoEdgeTwoCrossingsStripKeptCount;
+        public int twoEdgeTwoCrossingsStripDiscardedCount;
+        public int twoEdgeTwoCrossingsIntervalMismatchCount;
+        public int twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount;
+        public int twoEdgeTwoCrossingsAltOutsideUsedCount;
+        public int twoEdgeTwoCrossingsOutsideDirectOutputCount;
+        public int fallbackToLegacySingleCutCount;
+        public int legacySingleCutSucceededAfterTwoLineFailureCount;
+        public int legacySingleCutFailedCount;
+        public int legacySingleCutAttemptCount;
+        public int fallbackToOldKeepDeleteCount;
+        public int finalPathTwoLineCount;
+        public int finalPathLegacySingleCutCount;
+        public int finalPathOldFallbackCount;
+        public int fourBoundaryTotalCount;
+        public int optionalTwoLineRescueCandidateCount;
+        public int optionalTwoLineRescueAttemptCount;
+        public int optionalTwoLineRescueSuccessCount;
+        public int optionalTwoLineRescueRejectedCount;
+        public int optionalTwoLineRescueSkippedBecauseLegacyNotTrimCount;
+        public int optionalTwoLineRescueSkippedBecauseBoundaryPointCountNot4;
+        public int optionalTwoLineRescueSkippedBecauseNotTwoEdgeTwoCrossings;
+        public int optionalTwoLineRescueSkippedBecauseInvalidStrip;
+        public int optionalTwoLineRescueSkippedBecauseIntervalMismatch;
+        public int optionalTwoLineRescueSkippedBecauseGeneratedZero;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -96,9 +180,17 @@ public static class MeshTrimProcessor
             Debug.Log("[NDMF VRoid Mesh Trimmer] Trimmer is null. Skip.");
             return;
         }
+        if (trimmer.debugFourPointClipDetails)
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] ApplyTrim entered. RendererCountTargets={trimmer.targets?.Count ?? 0}, max={trimmer.debugFourPointClipMaxTriangles}, filter={trimmer.debugFourPointMaterialFilter}, preserveBlendShapes={preserveBlendShapes}");
+        }
 
         Dictionary<Texture2D, AlphaMaskProcessor.AlphaMaskData> maskCache = new Dictionary<Texture2D, AlphaMaskProcessor.AlphaMaskData>();
         Dictionary<SkinnedMeshRenderer, Dictionary<int, SubMeshTask>> tasksByRenderer = new Dictionary<SkinnedMeshRenderer, Dictionary<int, SubMeshTask>>();
+        if (trimmer.debugFourPointClipDetails)
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] Debug enabled. MaxTriangles={trimmer.debugFourPointClipMaxTriangles}, MaterialFilter={trimmer.debugFourPointMaterialFilter}");
+        }
         int preSubdivideEnabledTargetCount = 0;
         int quadAwareEnabledTargetCount = 0;
 
@@ -146,6 +238,11 @@ public static class MeshTrimProcessor
                 existingTask.preSubdivideLevel = Mathf.Max(existingTask.preSubdivideLevel, target.preSubdivideLevel);
                 existingTask.preSubdivideQuadAware = existingTask.preSubdivideQuadAware || target.preSubdivideQuadAware;
             }
+        }
+
+        if (trimmer.debugFourPointClipDetails && tasksByRenderer.Count == 0)
+        {
+            Debug.Log("[NDMF VRoid Mesh Trimmer][4pt-debug] No trim tasks were built. Check target/usages/active renderer/material bindings.");
         }
 
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Trim task renderers={tasksByRenderer.Count}, PreSubdivideEnabledTargetCount={preSubdivideEnabledTargetCount}, QuadAwareEnabledTargetCount={quadAwareEnabledTargetCount}");
@@ -227,6 +324,8 @@ public static class MeshTrimProcessor
             }
             swPre.Stop();
 
+            string materialName = (renderer.sharedMaterials != null && sub < renderer.sharedMaterials.Length && renderer.sharedMaterials[sub] != null) ? renderer.sharedMaterials[sub].name : "(null)";
+            string textureName = task.texture != null ? task.texture.name : "(null)";
             TrimStats stats = ProcessSubMesh(
                 workingIndices,
                 task.maskData,
@@ -248,7 +347,11 @@ public static class MeshTrimProcessor
                 hasColors,
                 hasBoneWeights,
                 vertexSources,
-                newSubMeshIndices[sub]);
+                newSubMeshIndices[sub],
+                renderer.name,
+                sub,
+                materialName,
+                textureName);
 
             stats.addedVertices = vertices.Count - baseVertexCount;
             baseVertexCount = vertices.Count;
@@ -521,12 +624,25 @@ public static class MeshTrimProcessor
         bool hasColors,
         bool hasBoneWeights,
         List<VertexSource> vertexSources,
-        List<int> dstIndices)
+        List<int> dstIndices,
+        string rendererName,
+        int subMeshIndex,
+        string materialName,
+        string textureName)
     {
+        var debugCandidates = new List<FourPointDebugCandidate>();
         TrimStats stats = new TrimStats();
         var triangleResults = new List<TriangleTrimResult>(srcIndices.Length / 3);
         var edgeCuts = new List<EdgeCutInfo>();
-        EdgeIntersectionCache cache = new EdgeIntersectionCache();
+        EdgeCrossingCache cache = new EdgeCrossingCache();
+        int trianglesWith0BoundaryPoints = 0;
+        int trianglesWith1BoundaryPoint = 0;
+        int trianglesWith2BoundaryPoints = 0;
+        int trianglesWith3BoundaryPoints = 0;
+        int trianglesWith4BoundaryPoints = 0;
+        int trianglesWith5OrMoreBoundaryPoints = 0;
+        int maxBoundaryPointsOnTriangle = 0;
+        int optionalRescueDebugEmitCount = 0;
 
         // Prepass: generate and record all direct edge intersections first.
         for (int i = 0; i < srcIndices.Length; i += 3)
@@ -542,6 +658,12 @@ public static class MeshTrimProcessor
 
             int[] idx = { i0, i1, i2 };
             bool[] inside = { in0, in1, in2 };
+            EnsureEdgeCrossings(new EdgeKey(i0, i1), maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+            EnsureEdgeCrossings(new EdgeKey(i1, i2), maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+            EnsureEdgeCrossings(new EdgeKey(i2, i0), maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
 
             if (insideCount == 1)
             {
@@ -552,16 +674,18 @@ public static class MeshTrimProcessor
                     else if (outA < 0) outA = idx[k];
                     else outB = idx[k];
                 }
-                int cutA = GetOrCreateIntersection(insideV, outA, maskData, trimmer,
+                int cutA;
+                bool hasCutA = TryGetSingleIntersection(insideV, outA, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                int cutB = GetOrCreateIntersection(insideV, outB, maskData, trimmer,
+                    vertexSources, cache, ref stats, out cutA);
+                int cutB;
+                bool hasCutB = TryGetSingleIntersection(insideV, outB, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
-                AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
+                    vertexSources, cache, ref stats, out cutB);
+                if (hasCutA) AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
+                if (hasCutB) AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
             }
             else if (insideCount == 2)
             {
@@ -572,16 +696,18 @@ public static class MeshTrimProcessor
                     else if (inA < 0) inA = idx[k];
                     else inB = idx[k];
                 }
-                int cutA = GetOrCreateIntersection(inA, outsideV, maskData, trimmer,
+                int cutA;
+                bool hasCutA = TryGetSingleIntersection(inA, outsideV, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                int cutB = GetOrCreateIntersection(inB, outsideV, maskData, trimmer,
+                    vertexSources, cache, ref stats, out cutA);
+                int cutB;
+                bool hasCutB = TryGetSingleIntersection(inB, outsideV, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
-                    vertexSources, cache, ref stats);
-                AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
-                AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
+                    vertexSources, cache, ref stats, out cutB);
+                if (hasCutA) AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
+                if (hasCutB) AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
             }
         }
 
@@ -599,13 +725,46 @@ public static class MeshTrimProcessor
             Vector2 m01 = (uv[i0] + uv[i1]) * 0.5f;
             Vector2 m12 = (uv[i1] + uv[i2]) * 0.5f;
             Vector2 m20 = (uv[i2] + uv[i0]) * 0.5f;
+            Vector2 s01025 = Vector2.Lerp(uv[i0], uv[i1], 0.25f);
+            Vector2 s01050 = Vector2.Lerp(uv[i0], uv[i1], 0.5f);
+            Vector2 s01075 = Vector2.Lerp(uv[i0], uv[i1], 0.75f);
+            Vector2 s12025 = Vector2.Lerp(uv[i1], uv[i2], 0.25f);
+            Vector2 s12050 = Vector2.Lerp(uv[i1], uv[i2], 0.5f);
+            Vector2 s12075 = Vector2.Lerp(uv[i1], uv[i2], 0.75f);
+            Vector2 s20025 = Vector2.Lerp(uv[i2], uv[i0], 0.25f);
+            Vector2 s20050 = Vector2.Lerp(uv[i2], uv[i0], 0.5f);
+            Vector2 s20075 = Vector2.Lerp(uv[i2], uv[i0], 0.75f);
             Vector2 centroid = (uv[i0] + uv[i1] + uv[i2]) / 3f;
             bool m01In = AlphaMaskProcessor.SampleMask(maskData, m01);
             bool m12In = AlphaMaskProcessor.SampleMask(maskData, m12);
             bool m20In = AlphaMaskProcessor.SampleMask(maskData, m20);
             bool centroidIn = AlphaMaskProcessor.SampleMask(maskData, centroid);
+            var boundaryPoints = CollectBoundaryPointsForTriangle(i0, i1, i2, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+            int boundaryPointsDetected = boundaryPoints.Count;
+            if (boundaryPointsDetected == 0) trianglesWith0BoundaryPoints++;
+            else if (boundaryPointsDetected == 1) trianglesWith1BoundaryPoint++;
+            else if (boundaryPointsDetected == 2) trianglesWith2BoundaryPoints++;
+            else if (boundaryPointsDetected == 3) trianglesWith3BoundaryPoints++;
+            else if (boundaryPointsDetected == 4) trianglesWith4BoundaryPoints++;
+            else trianglesWith5OrMoreBoundaryPoints++;
+            if (boundaryPointsDetected == 4) stats.fourBoundaryTotalCount++;
+            if (boundaryPointsDetected > maxBoundaryPointsOnTriangle)
+            {
+                maxBoundaryPointsOnTriangle = boundaryPointsDetected;
+            }
+            if (boundaryPointsDetected >= 4)
+            {
+                stats.trianglesWithFourOrMoreBoundaryPoints++;
+            }
 
             int insideCount = (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0);
+            if (boundaryPointsDetected == 4 && insideCount != 0)
+            {
+                stats.optionalTwoLineRescueSkippedBecauseLegacyNotTrimCount++;
+            }
+
+            // BoundaryPoint-based output branches are intentionally disabled in this stage.
 
             if (insideCount == 3)
             {
@@ -621,6 +780,8 @@ public static class MeshTrimProcessor
 
             if (insideCount == 0)
             {
+                // zero-boundary expanded sampling branch intentionally disabled in this stage.
+
                 int edgeInsideCount = (m01In ? 1 : 0) + (m12In ? 1 : 0) + (m20In ? 1 : 0);
                 if (m01In || m12In || m20In || centroidIn)
                 {
@@ -637,8 +798,51 @@ public static class MeshTrimProcessor
                     }
                     else
                     {
-                        stats.removedTriangles++;
-                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
+                        bool rescueCandidate = boundaryPointsDetected == 4;
+                        bool rescueAttempted = false;
+                        bool rescueSucceeded = false;
+                        string rescueSkipReason = "legacyTrim";
+                        if (rescueCandidate) stats.optionalTwoLineRescueCandidateCount++;
+                        if (!rescueCandidate)
+                        {
+                            stats.optionalTwoLineRescueSkippedBecauseBoundaryPointCountNot4++;
+                            rescueSkipReason = "boundaryPointCountNot4";
+                        }
+                        else if (!TryClassifyOptionalRescueReadiness(i0, i1, i2, boundaryPoints, maskData, trimmer, vertices, uv, out rescueSkipReason))
+                        {
+                            if (rescueSkipReason == "notTwoEdgeTwoCrossings") stats.optionalTwoLineRescueSkippedBecauseNotTwoEdgeTwoCrossings++;
+                            else if (rescueSkipReason == "intervalMismatch") stats.optionalTwoLineRescueSkippedBecauseIntervalMismatch++;
+                            else stats.optionalTwoLineRescueSkippedBecauseInvalidStrip++;
+                        }
+                        else
+                        {
+                            rescueAttempted = true;
+                            stats.optionalTwoLineRescueAttemptCount++;
+                            int beforeRescue = dstIndices.Count;
+                            rescueSucceeded = TryProcessFourBoundaryTriangle(i0, i1, i2, triIndex, boundaryPoints, maskData, trimmer, vertices, uv, dstIndices, ref stats, debugCandidates, rendererName, subMeshIndex, materialName, textureName);
+                            if (!rescueSucceeded || dstIndices.Count <= beforeRescue)
+                            {
+                                rescueSucceeded = false;
+                                stats.optionalTwoLineRescueSkippedBecauseGeneratedZero++;
+                                rescueSkipReason = "generatedZero";
+                            }
+                        }
+
+                        if (rescueSucceeded)
+                        {
+                            stats.optionalTwoLineRescueSuccessCount++;
+                        }
+                        else
+                        {
+                            stats.optionalTwoLineRescueRejectedCount++;
+                            stats.removedTriangles++;
+                            triangleResults.Add(BuildResult(triIndex, TriangleTrimState.StrongTrim, i0, i1, i2, uv, 0f, 0));
+                        }
+                        if (trimmer.debugFourPointClipDetails && optionalRescueDebugEmitCount < 20)
+                        {
+                            optionalRescueDebugEmitCount++;
+                            Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] optional-rescue triangleIndex={triIndex}, boundaryPointsDetected={boundaryPointsDetected}, legacyResultKind=trim, legacyGeneratedTriangles=0, legacyKeptAreaUv=0, legacyRemovedAreaUv={Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f:F6}, rescueCandidate={rescueCandidate}, rescueAttempted={rescueAttempted}, rescueSucceeded={rescueSucceeded}, rescueSkipReason={rescueSkipReason}, finalPath={(rescueSucceeded ? "rescue" : "legacy")}");
+                        }
                     }
                     continue;
                 }
@@ -653,9 +857,51 @@ public static class MeshTrimProcessor
                     }
                     else
                     {
-                        stats.removedTriangles++;
-                        stats.singleEdgeMidpointInsideDiscarded++;
-                        triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 0f, 1));
+                        bool rescueCandidate = boundaryPointsDetected == 4;
+                        bool rescueAttempted = false;
+                        bool rescueSucceeded = false;
+                        string rescueSkipReason = "legacyTrim";
+                        if (rescueCandidate) stats.optionalTwoLineRescueCandidateCount++;
+                        if (!rescueCandidate)
+                        {
+                            stats.optionalTwoLineRescueSkippedBecauseBoundaryPointCountNot4++;
+                            rescueSkipReason = "boundaryPointCountNot4";
+                        }
+                        else if (!TryClassifyOptionalRescueReadiness(i0, i1, i2, boundaryPoints, maskData, trimmer, vertices, uv, out rescueSkipReason))
+                        {
+                            if (rescueSkipReason == "notTwoEdgeTwoCrossings") stats.optionalTwoLineRescueSkippedBecauseNotTwoEdgeTwoCrossings++;
+                            else if (rescueSkipReason == "intervalMismatch") stats.optionalTwoLineRescueSkippedBecauseIntervalMismatch++;
+                            else stats.optionalTwoLineRescueSkippedBecauseInvalidStrip++;
+                        }
+                        else
+                        {
+                            rescueAttempted = true;
+                            stats.optionalTwoLineRescueAttemptCount++;
+                            int beforeRescue = dstIndices.Count;
+                            rescueSucceeded = TryProcessFourBoundaryTriangle(i0, i1, i2, triIndex, boundaryPoints, maskData, trimmer, vertices, uv, dstIndices, ref stats, debugCandidates, rendererName, subMeshIndex, materialName, textureName);
+                            if (!rescueSucceeded || dstIndices.Count <= beforeRescue)
+                            {
+                                rescueSucceeded = false;
+                                stats.optionalTwoLineRescueSkippedBecauseGeneratedZero++;
+                                rescueSkipReason = "generatedZero";
+                            }
+                        }
+                        if (rescueSucceeded)
+                        {
+                            stats.optionalTwoLineRescueSuccessCount++;
+                        }
+                        else
+                        {
+                            stats.optionalTwoLineRescueRejectedCount++;
+                            stats.removedTriangles++;
+                            stats.singleEdgeMidpointInsideDiscarded++;
+                            triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 0f, 1));
+                        }
+                        if (trimmer.debugFourPointClipDetails && optionalRescueDebugEmitCount < 20)
+                        {
+                            optionalRescueDebugEmitCount++;
+                            Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] optional-rescue triangleIndex={triIndex}, boundaryPointsDetected={boundaryPointsDetected}, legacyResultKind=trim, legacyGeneratedTriangles=0, legacyKeptAreaUv=0, legacyRemovedAreaUv={Mathf.Abs(SignedArea(uv[i0], uv[i1], uv[i2])) * 0.5f:F6}, rescueCandidate={rescueCandidate}, rescueAttempted={rescueAttempted}, rescueSucceeded={rescueSucceeded}, rescueSkipReason={rescueSkipReason}, finalPath={(rescueSucceeded ? "rescue" : "legacy")}");
+                        }
                     }
                     continue;
                 }
@@ -746,18 +992,26 @@ public static class MeshTrimProcessor
                     }
                 }
 
-                int cutA = GetOrCreateIntersection(insideV, outA, maskData, trimmer,
+                int cutA;
+                bool hasCutA = TryGetSingleIntersection(insideV, outA, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
                     vertexSources,
-                    cache, ref stats);
+                    cache, ref stats, out cutA);
 
-                int cutB = GetOrCreateIntersection(insideV, outB, maskData, trimmer,
+                int cutB;
+                bool hasCutB = TryGetSingleIntersection(insideV, outB, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
                     vertexSources,
-                    cache, ref stats);
-
+                    cache, ref stats, out cutB);
+                if (!hasCutA || !hasCutB)
+                {
+                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                    stats.fallbackPreserved++;
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 0));
+                    continue;
+                }
                 AddEdgeCut(edgeCuts, triIndex, insideV, outA, cutA, uv);
                 AddEdgeCut(edgeCuts, triIndex, insideV, outB, cutB, uv);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, insideV, cutA, cutB, vertices, uv, trimmer, ref stats);
@@ -784,18 +1038,27 @@ public static class MeshTrimProcessor
                     }
                 }
 
-                int cutA = GetOrCreateIntersection(inA, outsideV, maskData, trimmer,
+                int cutA;
+                bool hasCutA = TryGetSingleIntersection(inA, outsideV, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
                     vertexSources,
-                    cache, ref stats);
+                    cache, ref stats, out cutA);
 
-                int cutB = GetOrCreateIntersection(inB, outsideV, maskData, trimmer,
+                int cutB;
+                bool hasCutB = TryGetSingleIntersection(inB, outsideV, maskData, trimmer,
                     vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights,
                     vertexSources,
-                    cache, ref stats);
+                    cache, ref stats, out cutB);
 
+                if (!hasCutA || !hasCutB)
+                {
+                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                    stats.fallbackPreserved++;
+                    triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 0));
+                    continue;
+                }
                 AddEdgeCut(edgeCuts, triIndex, inA, outsideV, cutA, uv);
                 AddEdgeCut(edgeCuts, triIndex, inB, outsideV, cutB, uv);
                 AddTrianglePreserveWinding(dstIndices, i0, i1, i2, inA, inB, cutA, vertices, uv, trimmer, ref stats);
@@ -875,7 +1138,153 @@ public static class MeshTrimProcessor
             edgeCuts[i] = e;
         }
         stats.outputTriangles = dstIndices.Count / 3;
+        int edgesWith0Crossings = 0;
+        int edgesWith1Crossing = 0;
+        int edgesWith2Crossings = 0;
+        int maxCrossingsOnEdge = 0;
+        foreach (var kv in cache.Entries)
+        {
+            int crossingCount = kv.Value.Count;
+            if (crossingCount == 0) edgesWith0Crossings++;
+            else if (crossingCount == 1) edgesWith1Crossing++;
+            else if (crossingCount == 2) edgesWith2Crossings++;
+            if (crossingCount > maxCrossingsOnEdge) maxCrossingsOnEdge = crossingCount;
+        }
+
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] EdgeCrossingCache created count={cache.CreatedCount}, hit count={cache.HitCount}, shared edge crossings reused count={cache.ReusedCount}, edges with 0 crossings={edgesWith0Crossings}, edges with 1 crossing={edgesWith1Crossing}, edges with 2 crossings={edgesWith2Crossings}, max crossings on edge={maxCrossingsOnEdge}, triangles with 4+ boundary points detected={stats.trianglesWithFourOrMoreBoundaryPoints}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Triangle boundary points summary: triangles with 0 boundary points={trianglesWith0BoundaryPoints}, triangles with 1 boundary point={trianglesWith1BoundaryPoint}, triangles with 2 boundary points={trianglesWith2BoundaryPoints}, triangles with 3 boundary points={trianglesWith3BoundaryPoints}, triangles with 4 boundary points={trianglesWith4BoundaryPoints}, triangles with 5+ boundary points={trianglesWith5OrMoreBoundaryPoints}, max boundary points on triangle={maxBoundaryPointsOnTriangle}");
+        if (trimmer != null && trimmer.debugFourPointClipDetails)
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] Zero-boundary sampling summary: zero-boundary keep count={stats.zeroBoundaryKeepCount}, zero-boundary delete count={stats.zeroBoundaryDeleteCount}, centroid-only deleted count={stats.centroidOnlyDeletedCount}, zero-boundary mixed keep count={stats.zeroBoundaryMixedKeepCount}, zero-boundary mixed delete count={stats.zeroBoundaryMixedDeleteCount}");
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] Two-boundary summary: two-boundary processed count={stats.twoBoundaryProcessedCount}, two-boundary kept region count={stats.twoBoundaryKeptRegionCount}, two-boundary generated triangles count={stats.twoBoundaryGeneratedTrianglesCount}, two-boundary fallback count={stats.twoBoundaryFallbackCount}");
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] Four-plus-boundary fallback summary: four-plus-boundary fallback count={stats.fourPlusBoundaryFallbackCount}, four-plus-boundary keep count={stats.fourPlusBoundaryKeepCount}, four-plus-boundary delete count={stats.fourPlusBoundaryDeleteCount}");
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point clip summary: triangles with 4 boundary points={trianglesWith4BoundaryPoints}, 4-point clip success count={stats.fourPointClipSuccessCount}, 4-point clip fallback count={stats.fourPointClipFallbackCount}, generated triangles by 4-point clip={stats.fourPointClipGeneratedTriangles}, four-point clip generated zero fallback count={stats.fourPointClipGeneratedZeroFallbackCount}, four-point generated triangle inside count={stats.fourPointGeneratedTriangleInsideCount}, four-point generated triangle outside count={stats.fourPointGeneratedTriangleOutsideCount}, four-point reversed-side suspected count={stats.fourPointReversedSideSuspectedCount}, four-point fallback due to invalid sample count={stats.fourPointFallbackDueToInvalidSampleCount}, rescued single-midpoint count={stats.singleEdgeMidpointAndCentroidInsidePreserved}");
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point pairing summary: four-point pairing candidates tested count={stats.fourPointPairingCandidatesTestedCount}, four-point pairing A selected count={stats.fourPointPairingASelectedCount}, four-point pairing B selected count={stats.fourPointPairingBSelectedCount}, four-point pairing C selected count={stats.fourPointPairingCSelectedCount}, four-point pairing rejected by same-edge-line count={stats.fourPointPairingRejectedBySameEdgeLineCount}, four-point pairing rejected by intersection count={stats.fourPointPairingRejectedByIntersectionCount}, four-point pairing rejected by degenerate count={stats.fourPointPairingRejectedByDegenerateCount}, four-point pairing fallback count={stats.fourPointPairingFallbackCount}, four-point best score={stats.fourPointBestScore}, four-point generated triangles count={stats.fourPointGeneratedTrianglesCount}, four-point kept triangles count={stats.fourPointKeptTrianglesCount}, four-point discarded triangles count={stats.fourPointDiscardedTrianglesCount}, twoEdgeTwoCrossings detected count={stats.twoEdgeTwoCrossingsDetectedCount}, twoEdgeTwoCrossings strip kept count={stats.twoEdgeTwoCrossingsStripKeptCount}, twoEdgeTwoCrossings strip discarded count={stats.twoEdgeTwoCrossingsStripDiscardedCount}, twoEdgeTwoCrossings interval mismatch count={stats.twoEdgeTwoCrossingsIntervalMismatchCount}, strip rejected by midpoint containment count={stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount}, twoEdgeTwoCrossings alt outside used count={stats.twoEdgeTwoCrossingsAltOutsideUsedCount}, twoEdgeTwoCrossings outside direct output count={stats.twoEdgeTwoCrossingsOutsideDirectOutputCount}");
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point fallback path summary: fallback to legacy single-cut count={stats.fallbackToLegacySingleCutCount}, legacy single-cut attempt count={stats.legacySingleCutAttemptCount}, legacy single-cut succeeded after two-line failure count={stats.legacySingleCutSucceededAfterTwoLineFailureCount}, legacy single-cut failed count={stats.legacySingleCutFailedCount}, fallback to old keep/delete count={stats.fallbackToOldKeepDeleteCount}");
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] 4-point final path summary: finalPath=twoLine count={stats.finalPathTwoLineCount}, finalPath=legacySingleCut count={stats.finalPathLegacySingleCutCount}, finalPath=oldFallback count={stats.finalPathOldFallbackCount}");
+            Debug.Log($"[NDMF VRoid Mesh Trimmer] optional two-line rescue summary: fourBoundaryTotalCount={stats.fourBoundaryTotalCount}, optionalTwoLineRescueCandidateCount={stats.optionalTwoLineRescueCandidateCount}, optionalTwoLineRescueAttemptCount={stats.optionalTwoLineRescueAttemptCount}, optionalTwoLineRescueSuccessCount={stats.optionalTwoLineRescueSuccessCount}, optionalTwoLineRescueRejectedCount={stats.optionalTwoLineRescueRejectedCount}, optionalTwoLineRescueSkippedBecauseLegacyNotTrimCount={stats.optionalTwoLineRescueSkippedBecauseLegacyNotTrimCount}, optionalTwoLineRescueSkippedBecauseBoundaryPointCountNot4={stats.optionalTwoLineRescueSkippedBecauseBoundaryPointCountNot4}, optionalTwoLineRescueSkippedBecauseNotTwoEdgeTwoCrossings={stats.optionalTwoLineRescueSkippedBecauseNotTwoEdgeTwoCrossings}, optionalTwoLineRescueSkippedBecauseInvalidStrip={stats.optionalTwoLineRescueSkippedBecauseInvalidStrip}, optionalTwoLineRescueSkippedBecauseIntervalMismatch={stats.optionalTwoLineRescueSkippedBecauseIntervalMismatch}, optionalTwoLineRescueSkippedBecauseGeneratedZero={stats.optionalTwoLineRescueSkippedBecauseGeneratedZero}");
+        }
+        if (trimmer != null && trimmer.debugFourPointClipDetails && debugCandidates.Count > 0)
+        {
+            debugCandidates.Sort((a, b) => b.suspicion.CompareTo(a.suspicion));
+            int maxCount = Mathf.Max(0, trimmer.debugFourPointClipMaxTriangles);
+            int emit = Mathf.Min(maxCount, debugCandidates.Count);
+            for (int i = 0; i < emit; i++) Debug.Log(debugCandidates[i].logBlock);
+        }
+        else if (trimmer != null && trimmer.debugFourPointClipDetails)
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] No debug candidates emitted. Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Filter={trimmer.debugFourPointMaterialFilter}, TrianglesWith4BoundaryPoints={trianglesWith4BoundaryPoints}");
+        }
         return stats;
+    }
+
+    private static int CountExpandedInsideSamples(
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        Vector2 uv0,
+        Vector2 uv1,
+        Vector2 uv2,
+        bool in0,
+        bool in1,
+        bool in2,
+        bool centroidIn)
+    {
+        bool s01025In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv0, uv1, 0.25f));
+        bool s01050In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv0, uv1, 0.5f));
+        bool s01075In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv0, uv1, 0.75f));
+        bool s12025In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv1, uv2, 0.25f));
+        bool s12050In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv1, uv2, 0.5f));
+        bool s12075In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv1, uv2, 0.75f));
+        bool s20025In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv2, uv0, 0.25f));
+        bool s20050In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv2, uv0, 0.5f));
+        bool s20075In = AlphaMaskProcessor.SampleMask(maskData, Vector2.Lerp(uv2, uv0, 0.75f));
+
+        return
+            (in0 ? 1 : 0) + (in1 ? 1 : 0) + (in2 ? 1 : 0) +
+            (s01025In ? 1 : 0) + (s01050In ? 1 : 0) + (s01075In ? 1 : 0) +
+            (s12025In ? 1 : 0) + (s12050In ? 1 : 0) + (s12075In ? 1 : 0) +
+            (s20025In ? 1 : 0) + (s20050In ? 1 : 0) + (s20075In ? 1 : 0) +
+            (centroidIn ? 1 : 0);
+    }
+
+    private static List<BoundaryPoint> CollectBoundaryPointsForTriangle(
+        int i0,
+        int i1,
+        int i2,
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Vector2> uv,
+        List<Vector2> uv2,
+        List<Vector2> uv3,
+        List<Vector2> uv4,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasUv2,
+        bool hasUv3,
+        bool hasUv4,
+        bool hasColors,
+        bool hasBoneWeights,
+        List<VertexSource> vertexSources,
+        EdgeCrossingCache cache,
+        ref TrimStats stats)
+    {
+        var boundaryPoints = new List<BoundaryPoint>();
+        AddBoundaryPointsForEdge(boundaryPoints, 0, i0, i1, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+        AddBoundaryPointsForEdge(boundaryPoints, 1, i1, i2, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+        AddBoundaryPointsForEdge(boundaryPoints, 2, i2, i0, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights, hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+        boundaryPoints.Sort((x, y) => x.perimeterOrder.CompareTo(y.perimeterOrder));
+        return boundaryPoints;
+    }
+
+    private static void AddBoundaryPointsForEdge(
+        List<BoundaryPoint> boundaryPoints,
+        int edgeIndex,
+        int edgeA,
+        int edgeB,
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Vector2> uv,
+        List<Vector2> uv2,
+        List<Vector2> uv3,
+        List<Vector2> uv4,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasUv2,
+        bool hasUv3,
+        bool hasUv4,
+        bool hasColors,
+        bool hasBoneWeights,
+        List<VertexSource> vertexSources,
+        EdgeCrossingCache cache,
+        ref TrimStats stats)
+    {
+        var orderedCrossings = GetCrossingsForTriangleEdge(edgeA, edgeB, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+        var edgeKey = new EdgeKey(edgeA, edgeB);
+        bool localMatchesCanonical = edgeA == edgeKey.a;
+
+        foreach (var crossing in orderedCrossings)
+        {
+            float localTOnEdge = localMatchesCanonical ? crossing.tCanonical : 1f - crossing.tCanonical;
+            boundaryPoints.Add(new BoundaryPoint
+            {
+                edgeIndex = edgeIndex,
+                localTOnEdge = localTOnEdge,
+                crossing = crossing,
+                vertexIndex = crossing.vertexIndex,
+                uv = crossing.uv,
+                perimeterOrder = edgeIndex + localTOnEdge
+            });
+        }
     }
 
 
@@ -936,9 +1345,9 @@ public static class MeshTrimProcessor
         };
     }
 
-    private static int GetOrCreateIntersection(
-        int insideIndex,
-        int outsideIndex,
+    private static bool TryGetSingleIntersection(
+        int edgeA,
+        int edgeB,
         AlphaMaskProcessor.AlphaMaskData maskData,
         NDMFVRoidMeshTrimmer trimmer,
         List<Vector3> vertices,
@@ -958,52 +1367,167 @@ public static class MeshTrimProcessor
         bool hasColors,
         bool hasBoneWeights,
         List<VertexSource> vertexSources,
-        EdgeIntersectionCache cache,
+        EdgeCrossingCache cache,
+        ref TrimStats stats,
+        out int cutPointIndex)
+    {
+        cutPointIndex = -1;
+        var crossings = GetCrossingsForTriangleEdge(edgeA, edgeB, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+        if (crossings.Count != 1) return false;
+        cutPointIndex = crossings[0].vertexIndex;
+        return true;
+    }
+
+    private static List<EdgeCrossing> GetCrossingsForTriangleEdge(
+        int edgeA,
+        int edgeB,
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Vector2> uv,
+        List<Vector2> uv2,
+        List<Vector2> uv3,
+        List<Vector2> uv4,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasUv2,
+        bool hasUv3,
+        bool hasUv4,
+        bool hasColors,
+        bool hasBoneWeights,
+        List<VertexSource> vertexSources,
+        EdgeCrossingCache cache,
         ref TrimStats stats)
     {
-        if (cache.TryGet(insideIndex, outsideIndex, out int cached))
+        var edgeKey = new EdgeKey(edgeA, edgeB);
+        var canonical = EnsureEdgeCrossings(edgeKey, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, cache, ref stats);
+        if (edgeA == edgeKey.a)
         {
-            return cached;
+            return canonical;
         }
 
-        Vector2 uvIn = uv[insideIndex];
-        Vector2 uvOut = uv[outsideIndex];
-
-        float lo = 0f;
-        float hi = 1f;
-        for (int i = 0; i < 10; i++)
+        var reversed = new List<EdgeCrossing>(canonical.Count);
+        for (int i = canonical.Count - 1; i >= 0; i--)
         {
-            float mid = (lo + hi) * 0.5f;
-            Vector2 uvMid = Vector2.LerpUnclamped(uvIn, uvOut, mid);
-            bool inside = AlphaMaskProcessor.SampleMask(maskData, uvMid);
-            if (inside)
+            reversed.Add(canonical[i]);
+        }
+        return reversed;
+    }
+
+    private static List<EdgeCrossing> EnsureEdgeCrossings(
+        EdgeKey edgeKey,
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Vector2> uv,
+        List<Vector2> uv2,
+        List<Vector2> uv3,
+        List<Vector2> uv4,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasUv2,
+        bool hasUv3,
+        bool hasUv4,
+        bool hasColors,
+        bool hasBoneWeights,
+        List<VertexSource> vertexSources,
+        EdgeCrossingCache cache,
+        ref TrimStats stats)
+    {
+        var crossings = cache.GetOrCreateEdgeCrossings(edgeKey);
+        if (crossings.Count > 0) return crossings;
+
+        int canonicalStart = edgeKey.a;
+        int canonicalEnd = edgeKey.b;
+        Vector2 uvStart = uv[canonicalStart];
+        Vector2 uvEnd = uv[canonicalEnd];
+        int segmentCount = Mathf.Max(1, trimmer.edgeSampleSegments);
+        int maxCrossingsPerEdge = Mathf.Max(1, trimmer.maxCrossingsPerEdge);
+        float step = 1f / segmentCount;
+        var sampleInside = new bool[segmentCount + 1];
+        for (int s = 0; s <= segmentCount; s++)
+        {
+            float t = s * step;
+            sampleInside[s] = AlphaMaskProcessor.SampleMask(maskData, Vector2.LerpUnclamped(uvStart, uvEnd, t));
+        }
+
+        for (int s = 0; s < segmentCount; s++)
+        {
+            bool fromInside = sampleInside[s];
+            bool toInside = sampleInside[s + 1];
+            if (fromInside == toInside) continue;
+
+            float lo = s * step;
+            float hi = (s + 1) * step;
+            for (int i = 0; i < 10; i++)
             {
-                lo = mid;
+                float mid = (lo + hi) * 0.5f;
+                Vector2 uvMid = Vector2.LerpUnclamped(uvStart, uvEnd, mid);
+                bool midInside = AlphaMaskProcessor.SampleMask(maskData, uvMid);
+                if (midInside == fromInside) lo = mid;
+                else hi = mid;
             }
+
+            float tCanonical = lo;
+            int newIndex;
+            if (tCanonical <= trimmer.minIntersectionT) newIndex = canonicalStart;
+            else if (tCanonical >= trimmer.maxIntersectionT) newIndex = canonicalEnd;
             else
             {
-                hi = mid;
+                newIndex = AddInterpolatedVertex(canonicalStart, canonicalEnd, tCanonical, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                    hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
             }
+
+            crossings.Add(new EdgeCrossing
+            {
+                tCanonical = tCanonical,
+                vertexIndex = newIndex,
+                uv = uv[newIndex],
+                vertexData = BuildVertexData(newIndex, vertices, normals, tangents, colors, boneWeights, hasNormals, hasTangents, hasColors, hasBoneWeights),
+                weightedSource = vertexSources[newIndex]
+            });
         }
 
-        float t = lo;
-
-        if (t <= trimmer.minIntersectionT)
+        crossings.Sort((x, y) => x.tCanonical.CompareTo(y.tCanonical));
+        if (crossings.Count > maxCrossingsPerEdge)
         {
-            cache.Set(insideIndex, outsideIndex, insideIndex);
-            return insideIndex;
+            Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] Edge {edgeKey.a}-{edgeKey.b} detected {crossings.Count} crossings. Limiting to {maxCrossingsPerEdge}.");
+            crossings.RemoveRange(maxCrossingsPerEdge, crossings.Count - maxCrossingsPerEdge);
         }
 
-        if (t >= trimmer.maxIntersectionT)
+        return crossings;
+    }
+
+    private static VertexData BuildVertexData(
+        int index,
+        List<Vector3> vertices,
+        List<Vector3> normals,
+        List<Vector4> tangents,
+        List<Color> colors,
+        List<BoneWeight> boneWeights,
+        bool hasNormals,
+        bool hasTangents,
+        bool hasColors,
+        bool hasBoneWeights)
+    {
+        return new VertexData
         {
-            cache.Set(insideIndex, outsideIndex, outsideIndex);
-            return outsideIndex;
-        }
-
-        int newIndex = AddInterpolatedVertex(insideIndex, outsideIndex, t, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
-        cache.Set(insideIndex, outsideIndex, newIndex);
-        return newIndex;
+            position = vertices[index],
+            normal = hasNormals ? normals[index] : Vector3.zero,
+            tangent = hasTangents ? tangents[index] : Vector4.zero,
+            color = hasColors ? colors[index] : Color.white,
+            boneWeight = hasBoneWeights ? boneWeights[index] : default
+        };
     }
 
     private static bool TryCreateIntersectionFromInsideSegment(
@@ -1287,6 +1811,634 @@ public static class MeshTrimProcessor
                 renderer.SetBlendShapeWeight(newIndex, weights[i]);
             }
         }
+    }
+
+
+    private static bool TryProcessTwoBoundaryTriangle(
+        int i0,
+        int i1,
+        int i2,
+        List<BoundaryPoint> boundaryPoints,
+        int insideCount,
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices,
+        List<Vector2> uv,
+        List<int> dstIndices,
+        ref TrimStats stats)
+    {
+        if (boundaryPoints == null || boundaryPoints.Count != 2) return false;
+        var tri = new int[] { i0, i1, i2 };
+        BoundaryPoint p0 = boundaryPoints[0];
+        BoundaryPoint p1 = boundaryPoints[1];
+        int e0 = p0.edgeIndex;
+        int e1 = p1.edgeIndex;
+        if (e0 < 0 || e0 > 2 || e1 < 0 || e1 > 2 || e0 == e1)
+        {
+            stats.twoBoundaryFallbackCount++;
+            return false;
+        }
+
+        List<int> BuildRegion(int startEdge, int endEdge, int startPoint, int endPoint)
+        {
+            var poly = new List<int>(4) { startPoint };
+            int edge = startEdge;
+            while (true)
+            {
+                poly.Add(tri[(edge + 1) % 3]);
+                if (edge == endEdge) break;
+                edge = (edge + 1) % 3;
+            }
+            poly.Add(endPoint);
+            return poly;
+        }
+
+        var regionA = BuildRegion(e0, e1, p0.vertexIndex, p1.vertexIndex);
+        var regionB = BuildRegion(e1, e0, p1.vertexIndex, p0.vertexIndex);
+
+        bool keepA = AlphaMaskProcessor.SampleMask(maskData, AverageUv(regionA, uv));
+        bool keepB = AlphaMaskProcessor.SampleMask(maskData, AverageUv(regionB, uv));
+        if (!keepA && !keepB)
+        {
+            if (insideCount > 0) keepA = true;
+            else return true;
+        }
+
+        stats.twoBoundaryProcessedCount++;
+        int before = dstIndices.Count / 3;
+        if (keepA) { TriangulateRegion(i0, i1, i2, regionA, vertices, uv, trimmer, dstIndices, ref stats); stats.twoBoundaryKeptRegionCount++; }
+        if (keepB) { TriangulateRegion(i0, i1, i2, regionB, vertices, uv, trimmer, dstIndices, ref stats); stats.twoBoundaryKeptRegionCount++; }
+        stats.twoBoundaryGeneratedTrianglesCount += (dstIndices.Count / 3) - before;
+        return true;
+    }
+
+
+    private static bool TryProcessFourBoundaryTriangle(
+        int i0, int i1, int i2, int triangleIndex, List<BoundaryPoint> boundaryPoints, AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices, List<Vector2> uv, List<int> dstIndices, ref TrimStats stats, List<FourPointDebugCandidate> debugCandidates, string rendererName, int subMeshIndex, string materialName, string textureName)
+    {
+        if (boundaryPoints == null || boundaryPoints.Count != 4) return false;
+        boundaryPoints.Sort((a, b) => a.perimeterOrder.CompareTo(b.perimeterOrder));
+        if (TryProcessTwoEdgeTwoCrossings(i0, i1, i2, triangleIndex, boundaryPoints, maskData, trimmer, vertices, uv, dstIndices, ref stats, debugCandidates, materialName))
+        {
+            return true;
+        }
+        int[][] pairings =
+        {
+            new[] { 0, 1, 2, 3 }, // A
+            new[] { 3, 0, 1, 2 }, // B (p0-p3, p1-p2)
+            new[] { 0, 2, 1, 3 }  // C (p0-p2, p1-p3)
+        };
+        float bestScore = float.NegativeInfinity;
+        int bestPairingIndex = -1;
+        var bestAccepted = new List<int>();
+        int bestInside = 0;
+        int bestOutside = 0;
+        string[] candidateReasons = { "notTested", "notTested", "notTested" };
+        float[] candidateScores = { float.NaN, float.NaN, float.NaN };
+
+        for (int pairIdx = 0; pairIdx < pairings.Length; pairIdx++)
+        {
+            var pairing = pairings[pairIdx];
+            stats.fourPointPairingCandidatesTestedCount++;
+            var p0 = boundaryPoints[pairing[0]];
+            var p1 = boundaryPoints[pairing[1]];
+            var p2 = boundaryPoints[pairing[2]];
+            var p3 = boundaryPoints[pairing[3]];
+            float lenA = (uv[p0.vertexIndex] - uv[p1.vertexIndex]).magnitude;
+            float lenB = (uv[p2.vertexIndex] - uv[p3.vertexIndex]).magnitude;
+            if (p0.edgeIndex == p1.edgeIndex || p2.edgeIndex == p3.edgeIndex)
+            {
+                stats.fourPointPairingRejectedBySameEdgeLineCount++;
+                candidateReasons[pairIdx] = "rejectedBySameEdgeLine";
+                continue;
+            }
+            if (lenA <= 1e-6f || lenB <= 1e-6f)
+            {
+                stats.fourPointPairingRejectedByDegenerateCount++;
+                candidateReasons[pairIdx] = "rejectedByZeroLengthLine";
+                continue;
+            }
+            if (SegmentsIntersect(uv[p0.vertexIndex], uv[p1.vertexIndex], uv[p2.vertexIndex], uv[p3.vertexIndex]))
+            {
+                stats.fourPointPairingRejectedByIntersectionCount++;
+                candidateReasons[pairIdx] = "rejectedByLineIntersection";
+                continue;
+            }
+            BuildFourBoundaryRegions(i0, i1, i2, p0, p1, p2, p3, out var rA, out var rB, out var rMid);
+            if (rA.Count < 3 || rB.Count < 3 || rMid.Count < 3)
+            {
+                stats.fourPointPairingRejectedByDegenerateCount++;
+                candidateReasons[pairIdx] = "rejectedByDegenerate";
+                continue;
+            }
+            bool keepA = EstimateKeep(maskData, rA, uv);
+            bool keepB = EstimateKeep(maskData, rB, uv);
+            bool keepMid = EstimateKeep(maskData, rMid, uv);
+            if (!keepA && !keepB && !keepMid)
+            {
+                stats.fourPointPairingRejectedByDegenerateCount++;
+                candidateReasons[pairIdx] = "rejectedByNoKeepRegion";
+                continue;
+            }
+            var generatedIndices = new List<int>();
+            if (keepA) TriangulateRegion(i0, i1, i2, rA, vertices, uv, trimmer, generatedIndices, ref stats);
+            if (keepB) TriangulateRegion(i0, i1, i2, rB, vertices, uv, trimmer, generatedIndices, ref stats);
+            if (keepMid) TriangulateRegion(i0, i1, i2, rMid, vertices, uv, trimmer, generatedIndices, ref stats);
+            var acceptedTriangles = new List<int>();
+            int insideTriCount = 0;
+            int outsideTriCount = 0;
+            float score = 0f;
+            bool hasInvalidSampling = false;
+            for (int t = 0; t + 2 < generatedIndices.Count; t += 3)
+            {
+                int a = generatedIndices[t];
+                int b = generatedIndices[t + 1];
+                int c = generatedIndices[t + 2];
+                if (!TrySampleTriangleInsideRatio(maskData, uv[a], uv[b], uv[c], out float ratio))
+                {
+                    hasInvalidSampling = true;
+                    continue;
+                }
+                float area = Mathf.Abs(SignedArea(uv[a], uv[b], uv[c])) * 0.5f;
+                score += Mathf.Max(ratio, 1f - ratio) * area;
+                if (ratio >= 0.5f)
+                {
+                    acceptedTriangles.Add(a);
+                    acceptedTriangles.Add(b);
+                    acceptedTriangles.Add(c);
+                    insideTriCount++;
+                }
+                else
+                {
+                    outsideTriCount++;
+                }
+            }
+            int generatedTriCount = generatedIndices.Count / 3;
+            if (hasInvalidSampling || generatedTriCount <= 0 || acceptedTriangles.Count == 0)
+            {
+                if (hasInvalidSampling) stats.fourPointFallbackDueToInvalidSampleCount++;
+                stats.fourPointPairingRejectedByDegenerateCount++;
+                candidateReasons[pairIdx] = hasInvalidSampling ? "rejectedByInvalidSampleCount" : "rejectedByInvalidArea";
+                continue;
+            }
+
+            float tieBreaker = -outsideTriCount * 1e-4f;
+            float finalScore = score + tieBreaker;
+            candidateReasons[pairIdx] = "accepted";
+            candidateScores[pairIdx] = finalScore;
+            if (finalScore > bestScore)
+            {
+                bestScore = finalScore;
+                bestPairingIndex = pairIdx;
+                bestAccepted = acceptedTriangles;
+                bestInside = insideTriCount;
+                bestOutside = outsideTriCount;
+            }
+        }
+        if (bestPairingIndex < 0)
+        {
+            stats.fourPointPairingFallbackCount++;
+            stats.fourPointClipGeneratedZeroFallbackCount++;
+            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 220f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Texture={textureName}, fallbackUsed=true, fallbackReason=no valid pairing, bestScore=-inf, PairingA:reason={candidateReasons[0]},score={candidateScores[0]}, PairingB:reason={candidateReasons[1]},score={candidateScores[1]}, PairingC:reason={candidateReasons[2]},score={candidateScores[2]}");
+            return false;
+        }
+        if (bestPairingIndex == 0) stats.fourPointPairingASelectedCount++;
+        else if (bestPairingIndex == 1) stats.fourPointPairingBSelectedCount++;
+        else if (bestPairingIndex == 2) stats.fourPointPairingCSelectedCount++;
+        if (bestOutside > bestInside) stats.fourPointReversedSideSuspectedCount++;
+        stats.fourPointBestScore = Mathf.Max(stats.fourPointBestScore, bestScore);
+        stats.fourPointGeneratedTriangleInsideCount += bestInside;
+        stats.fourPointGeneratedTriangleOutsideCount += bestOutside;
+        stats.fourPointKeptTrianglesCount += bestInside;
+        stats.fourPointDiscardedTrianglesCount += bestOutside;
+        dstIndices.AddRange(bestAccepted);
+        int generated = bestAccepted.Count / 3;
+        stats.fourPointGeneratedTrianglesCount += generated;
+        stats.fourPointClipSuccessCount++;
+        stats.fourPointClipGeneratedTriangles += generated;
+        string pairingName = bestPairingIndex == 0 ? "A" : (bestPairingIndex == 1 ? "B" : "C");
+        float suspicion = (pairingName != "A" ? 20f : 0f) + (bestOutside == 0 ? 30f : 0f) + (bestInside == 0 ? 50f : 0f) + ((bestScore < 0.05f) ? 20f : 0f);
+        string bp = "";
+        for (int bi = 0; bi < boundaryPoints.Count; bi++)
+        {
+            var p = boundaryPoints[bi];
+            int edgeA = (p.edgeIndex == 0) ? i0 : (p.edgeIndex == 1 ? i1 : i2);
+            int edgeB = (p.edgeIndex == 0) ? i1 : (p.edgeIndex == 1 ? i2 : i0);
+            bp += $" p{bi}:(edge={p.edgeIndex}, t={p.localTOnEdge:F4}, po={p.perimeterOrder:F4}, uv={p.uv}, vi={p.vertexIndex}, in={AlphaMaskProcessor.SampleMask(maskData, p.uv)}, edgeKey=({Math.Min(edgeA, edgeB)},{Math.Max(edgeA, edgeB)}), tc={p.crossing.tCanonical:F4})";
+        }
+        TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, suspicion,
+            $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, Renderer={rendererName}, SubMesh={subMeshIndex}, Material={materialName}, Texture={textureName}, selectedPairing={pairingName}, fallbackUsed=false, bestScore={bestScore:F6}, keptTriangles={bestInside}, discardedTriangles={bestOutside}, generatedTriangles={generated}, PairingA:reason={candidateReasons[0]},score={candidateScores[0]}, PairingB:reason={candidateReasons[1]},score={candidateScores[1]}, PairingC:reason={candidateReasons[2]},score={candidateScores[2]}.{bp}");
+        return true;
+    }
+
+    private static bool TryClassifyOptionalRescueReadiness(
+        int i0, int i1, int i2, List<BoundaryPoint> boundaryPoints,
+        AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer, List<Vector3> vertices, List<Vector2> uv,
+        out string reason)
+    {
+        reason = "ok";
+        if (boundaryPoints == null || boundaryPoints.Count != 4)
+        {
+            reason = "boundaryPointCountNot4";
+            return false;
+        }
+        var grouped = boundaryPoints.GroupBy(bp => bp.edgeIndex).Where(g => g.Count() == 2).ToList();
+        if (grouped.Count != 2)
+        {
+            reason = "notTwoEdgeTwoCrossings";
+            return false;
+        }
+
+        var a = grouped[0].OrderBy(bp => bp.localTOnEdge).ToList();
+        var b = grouped[1].OrderBy(bp => bp.localTOnEdge).ToList();
+        Vector2 aMid = (a[0].uv + a[1].uv) * 0.5f;
+        Vector2 bMid = (b[0].uv + b[1].uv) * 0.5f;
+        bool aIn = AlphaMaskProcessor.SampleMask(maskData, aMid);
+        bool bIn = AlphaMaskProcessor.SampleMask(maskData, bMid);
+        if (aIn != bIn)
+        {
+            reason = "intervalMismatch";
+            return false;
+        }
+        var strip1 = new List<int> { a[0].vertexIndex, a[1].vertexIndex, b[1].vertexIndex, b[0].vertexIndex };
+        var strip2 = new List<int> { a[0].vertexIndex, a[1].vertexIndex, b[0].vertexIndex, b[1].vertexIndex };
+        EvaluateStripCandidate(strip1, i0, i1, i2, vertices, uv, trimmer, maskData, aMid, bMid, out bool s1Valid, out _, out _, out _, out _, out bool s1ContainsA, out bool s1ContainsB, out _, out _, out _);
+        EvaluateStripCandidate(strip2, i0, i1, i2, vertices, uv, trimmer, maskData, aMid, bMid, out bool s2Valid, out _, out _, out _, out _, out bool s2ContainsA, out bool s2ContainsB, out _, out _, out _);
+        bool ok1 = s1Valid && s1ContainsA && s1ContainsB;
+        bool ok2 = s2Valid && s2ContainsA && s2ContainsB;
+        if (!ok1 && !ok2)
+        {
+            reason = "invalidStrip";
+            return false;
+        }
+        return true;
+    }
+
+    private static bool TryProcessLegacySingleCutFromFourBoundary(
+        int i0, int i1, int i2, List<BoundaryPoint> boundaryPoints, int insideCount,
+        AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer, List<Vector3> vertices, List<Vector2> uv, List<int> dstIndices, ref TrimStats stats)
+    {
+        if (boundaryPoints == null || boundaryPoints.Count < 2) return false;
+        boundaryPoints.Sort((a, b) => a.perimeterOrder.CompareTo(b.perimeterOrder));
+        var pairCandidates = new List<(BoundaryPoint a, BoundaryPoint b, float score)>();
+        for (int i = 0; i < boundaryPoints.Count; i++)
+        {
+            for (int j = i + 1; j < boundaryPoints.Count; j++)
+            {
+                if (boundaryPoints[i].edgeIndex == boundaryPoints[j].edgeIndex) continue;
+                float edgeSpan = Mathf.Abs(boundaryPoints[i].perimeterOrder - boundaryPoints[j].perimeterOrder);
+                float uvDist = Vector2.Distance(boundaryPoints[i].uv, boundaryPoints[j].uv);
+                pairCandidates.Add((boundaryPoints[i], boundaryPoints[j], edgeSpan + uvDist));
+            }
+        }
+        pairCandidates.Sort((x, y) => y.score.CompareTo(x.score));
+        for (int k = 0; k < pairCandidates.Count; k++)
+        {
+            var candidate = new List<BoundaryPoint> { pairCandidates[k].a, pairCandidates[k].b };
+            if (TryProcessTwoBoundaryTriangle(i0, i1, i2, candidate, insideCount, maskData, trimmer, vertices, uv, dstIndices, ref stats))
+            {
+                if (trimmer != null && trimmer.debugFourPointClipDetails)
+                {
+                    Debug.Log($"[NDMF VRoid Mesh Trimmer][4pt-debug] legacySingleCut selected pair: edgeA={pairCandidates[k].a.edgeIndex}, edgeB={pairCandidates[k].b.edgeIndex}, uvA={pairCandidates[k].a.uv}, uvB={pairCandidates[k].b.uv}, score={pairCandidates[k].score:F6}");
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool TryProcessTwoEdgeTwoCrossings(
+        int i0, int i1, int i2, int triangleIndex, List<BoundaryPoint> boundaryPoints,
+        AlphaMaskProcessor.AlphaMaskData maskData, NDMFVRoidMeshTrimmer trimmer,
+        List<Vector3> vertices, List<Vector2> uv, List<int> dstIndices, ref TrimStats stats,
+        List<FourPointDebugCandidate> debugCandidates, string materialName)
+    {
+        int[] counts = { 0, 0, 0 };
+        for (int i = 0; i < boundaryPoints.Count; i++) counts[Mathf.Clamp(boundaryPoints[i].edgeIndex, 0, 2)]++;
+        int edgeA = -1, edgeB = -1;
+        for (int e = 0; e < 3; e++) if (counts[e] == 2) { if (edgeA < 0) edgeA = e; else edgeB = e; }
+        if (edgeA < 0 || edgeB < 0) return false;
+        stats.twoEdgeTwoCrossingsDetectedCount++;
+        var edgeAPoints = boundaryPoints.FindAll(p => p.edgeIndex == edgeA);
+        var edgeBPoints = boundaryPoints.FindAll(p => p.edgeIndex == edgeB);
+        edgeAPoints.Sort((x, y) => x.localTOnEdge.CompareTo(y.localTOnEdge));
+        edgeBPoints.Sort((x, y) => x.localTOnEdge.CompareTo(y.localTOnEdge));
+        var a0 = edgeAPoints[0];
+        var a1 = edgeAPoints[1];
+        var b0 = edgeBPoints[0];
+        var b1 = edgeBPoints[1];
+        Vector2 aMid = (edgeAPoints[0].uv + edgeAPoints[1].uv) * 0.5f;
+        Vector2 bMid = (edgeBPoints[0].uv + edgeBPoints[1].uv) * 0.5f;
+        bool aIn = AlphaMaskProcessor.SampleMask(maskData, aMid);
+        bool bIn = AlphaMaskProcessor.SampleMask(maskData, bMid);
+
+        var strip1 = new List<int> { a0.vertexIndex, a1.vertexIndex, b1.vertexIndex, b0.vertexIndex };
+        var strip2 = new List<int> { a0.vertexIndex, a1.vertexIndex, b0.vertexIndex, b1.vertexIndex };
+        EvaluateStripCandidate(strip1, i0, i1, i2, vertices, uv, trimmer, maskData, aMid, bMid, out bool s1Valid, out string s1Reason, out float s1AreaUv, out float s1AreaWorld, out bool s1Intersect, out bool s1ContainsMidA, out bool s1ContainsMidB, out float s1InsideRatio, out List<int> s1KeptTriangles, out List<int> s1DiscardTriangles);
+        EvaluateStripCandidate(strip2, i0, i1, i2, vertices, uv, trimmer, maskData, aMid, bMid, out bool s2Valid, out string s2Reason, out float s2AreaUv, out float s2AreaWorld, out bool s2Intersect, out bool s2ContainsMidA, out bool s2ContainsMidB, out float s2InsideRatio, out List<int> s2KeptTriangles, out List<int> s2DiscardTriangles);
+        bool keepStripPreferred = aIn && bIn;
+        bool discardStripPreferred = !aIn && !bIn;
+        if (aIn != bIn)
+        {
+            stats.twoEdgeTwoCrossingsIntervalMismatchCount++;
+        }
+
+        List<int> selectedTriangles = null;
+        List<int> selectedOutsideTriangles = null;
+        List<int> selectedOutsideTrianglesAlt = null;
+        string selectedStripCandidate = "none";
+        if (s1Valid && (!s1ContainsMidA || !s1ContainsMidB)) { s1Valid = false; s1Reason = "rejectedByMidpointContainment"; stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount++; }
+        if (s2Valid && (!s2ContainsMidA || !s2ContainsMidB)) { s2Valid = false; s2Reason = "rejectedByMidpointContainment"; stats.twoEdgeTwoCrossingsStripRejectedByMidpointContainmentCount++; }
+        if (s1Valid || s2Valid)
+        {
+            float s1Score = (s1ContainsMidA && s1ContainsMidB ? 1000f : 0f) + s1InsideRatio * 10f + s1AreaUv;
+            float s2Score = (s2ContainsMidA && s2ContainsMidB ? 1000f : 0f) + s2InsideRatio * 10f + s2AreaUv;
+            if (!s2Valid || (s1Valid && s1Score >= s2Score))
+            {
+                selectedTriangles = s1KeptTriangles;
+                selectedOutsideTriangles = s1DiscardTriangles;
+                selectedOutsideTrianglesAlt = s2DiscardTriangles;
+                selectedStripCandidate = "Strip1";
+            }
+            else
+            {
+                selectedTriangles = s2KeptTriangles;
+                selectedOutsideTriangles = s2DiscardTriangles;
+                selectedOutsideTrianglesAlt = s1DiscardTriangles;
+                selectedStripCandidate = "Strip2";
+            }
+        }
+
+        if (keepStripPreferred)
+        {
+            if (selectedTriangles == null || selectedTriangles.Count == 0) return false;
+            dstIndices.AddRange(selectedTriangles);
+            stats.twoEdgeTwoCrossingsStripKeptCount++;
+            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 60f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=true, mismatch={aIn!=bIn}, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), midA={aMid}, midAInside={aIn}, midB={bMid}, midBInside={bIn}, Strip1 vertices=[a0,a1,b1,b0], areaUv={s1AreaUv:F6}, areaWorld={s1AreaWorld:F6}, valid={s1Valid}, reason={s1Reason}, selfIntersect={s1Intersect}, containsMidA={s1ContainsMidA}, containsMidB={s1ContainsMidB}, insideRatio={s1InsideRatio:F3}, Strip2 vertices=[a0,a1,b0,b1], areaUv={s2AreaUv:F6}, areaWorld={s2AreaWorld:F6}, valid={s2Valid}, reason={s2Reason}, selfIntersect={s2Intersect}, containsMidA={s2ContainsMidA}, containsMidB={s2ContainsMidB}, insideRatio={s2InsideRatio:F3}, selectedStrip={selectedStripCandidate}");
+            return true;
+        }
+
+        if (discardStripPreferred)
+        {
+            stats.twoEdgeTwoCrossingsStripDiscardedCount++;
+            int currentOutsideCount = selectedOutsideTriangles != null ? selectedOutsideTriangles.Count : 0;
+            if (selectedOutsideTrianglesAlt != null && selectedOutsideTrianglesAlt.Count > currentOutsideCount)
+            {
+                selectedOutsideTriangles = selectedOutsideTrianglesAlt;
+                selectedStripCandidate += "+altOutside";
+                stats.twoEdgeTwoCrossingsAltOutsideUsedCount++;
+            }
+            if (selectedOutsideTriangles != null && selectedOutsideTriangles.Count > 0)
+            {
+                dstIndices.AddRange(selectedOutsideTriangles);
+                stats.twoEdgeTwoCrossingsOutsideDirectOutputCount++;
+                return true;
+            }
+            TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 80f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, mismatch={aIn!=bIn}, edgeA={edgeA}, edgeA points:a0(t={a0.localTOnEdge:F3},uv={a0.uv}) a1(t={a1.localTOnEdge:F3},uv={a1.uv}), edgeB={edgeB}, edgeB points:b0(t={b0.localTOnEdge:F3},uv={b0.uv}) b1(t={b1.localTOnEdge:F3},uv={b1.uv}), midA={aMid}, midAInside={aIn}, midB={bMid}, midBInside={bIn}, Strip1 valid={s1Valid}, reason={s1Reason}, containsMidA={s1ContainsMidA}, containsMidB={s1ContainsMidB}, Strip2 valid={s2Valid}, reason={s2Reason}, containsMidA={s2ContainsMidA}, containsMidB={s2ContainsMidB}, selectedStrip={selectedStripCandidate}, fallbackReason=strip outside");
+            return false;
+        }
+
+        stats.twoEdgeTwoCrossingsStripDiscardedCount++;
+        TryAddFourPointDebugCandidate(trimmer, debugCandidates, materialName, 80f, $"[NDMF VRoid Mesh Trimmer][4pt-debug] Triangle={triangleIndex}, twoEdgeTwoCrossings=true, stripKept=false, mismatch={aIn!=bIn}, edgeA={edgeA}, edgeB={edgeB}, midA={aMid}, midAInside={aIn}, midB={bMid}, midBInside={bIn}, Strip1 valid={s1Valid}, reason={s1Reason}, containsMidA={s1ContainsMidA}, containsMidB={s1ContainsMidB}, Strip2 valid={s2Valid}, reason={s2Reason}, containsMidA={s2ContainsMidA}, containsMidB={s2ContainsMidB}, selectedStrip={selectedStripCandidate}, fallbackReason=two-edge interval mismatch");
+        return false;
+    }
+
+    private static void EvaluateStripCandidate(List<int> poly, int i0, int i1, int i2, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, AlphaMaskProcessor.AlphaMaskData maskData, Vector2 midA, Vector2 midB, out bool valid, out string reason, out float areaUv, out float areaWorld, out bool selfIntersect, out bool containsMidA, out bool containsMidB, out float insideRatio, out List<int> keptTriangles, out List<int> discardTriangles)
+    {
+        keptTriangles = new List<int>();
+        discardTriangles = new List<int>();
+        reason = "valid";
+        areaUv = Mathf.Abs(SignedArea(uv[poly[0]], uv[poly[1]], uv[poly[2]])) * 0.5f + Mathf.Abs(SignedArea(uv[poly[0]], uv[poly[2]], uv[poly[3]])) * 0.5f;
+        selfIntersect = SegmentsIntersect(uv[poly[0]], uv[poly[1]], uv[poly[2]], uv[poly[3]]) || SegmentsIntersect(uv[poly[1]], uv[poly[2]], uv[poly[3]], uv[poly[0]]);
+        containsMidA = PointInTriangleUv(midA, uv[poly[0]], uv[poly[1]], uv[poly[2]]) || PointInTriangleUv(midA, uv[poly[0]], uv[poly[2]], uv[poly[3]]);
+        containsMidB = PointInTriangleUv(midB, uv[poly[0]], uv[poly[1]], uv[poly[2]]) || PointInTriangleUv(midB, uv[poly[0]], uv[poly[2]], uv[poly[3]]);
+        areaWorld = Vector3.Cross(vertices[poly[1]] - vertices[poly[0]], vertices[poly[2]] - vertices[poly[0]]).magnitude * 0.5f
+                  + Vector3.Cross(vertices[poly[2]] - vertices[poly[0]], vertices[poly[3]] - vertices[poly[0]]).magnitude * 0.5f;
+        if (selfIntersect || areaUv < trimmer.minTriangleUvArea)
+        {
+            valid = false; reason = selfIntersect ? "invalidSelfIntersect" : "invalidAreaUv"; insideRatio = 0f; return;
+        }
+        if (areaWorld < trimmer.minTriangleWorldArea) { valid = false; reason = "invalidAreaWorld"; insideRatio = 0f; return; }
+        var generated = new List<int>();
+        var dummy = new TrimStats();
+        TriangulateRegion(i0, i1, i2, poly, vertices, uv, trimmer, generated, ref dummy);
+        float sum = 0f; int n = 0;
+        for (int t = 0; t + 2 < generated.Count; t += 3)
+        {
+            if (TrySampleTriangleInsideRatio(maskData, uv[generated[t]], uv[generated[t + 1]], uv[generated[t + 2]], out float r))
+            {
+                sum += r; n++;
+                if (r >= 0.5f)
+                {
+                    keptTriangles.Add(generated[t]); keptTriangles.Add(generated[t + 1]); keptTriangles.Add(generated[t + 2]);
+                }
+                else
+                {
+                    discardTriangles.Add(generated[t]); discardTriangles.Add(generated[t + 1]); discardTriangles.Add(generated[t + 2]);
+                }
+            }
+        }
+        insideRatio = n > 0 ? sum / n : 0f;
+        valid = generated.Count >= 3;
+        if (!valid) reason = "invalidTriangulation";
+    }
+
+    private static void TryAddFourPointDebugCandidate(NDMFVRoidMeshTrimmer trimmer, List<FourPointDebugCandidate> list, string materialName, float suspicion, string block)
+    {
+        if (trimmer == null || !trimmer.debugFourPointClipDetails || list == null) return;
+        string filter = trimmer.debugFourPointMaterialFilter ?? "";
+        if (!string.IsNullOrEmpty(filter) && (materialName == null || materialName.IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0)) return;
+        list.Add(new FourPointDebugCandidate { suspicion = suspicion, logBlock = block });
+    }
+
+    private static bool TrySampleTriangleInsideRatio(AlphaMaskProcessor.AlphaMaskData maskData, Vector2 uv0, Vector2 uv1, Vector2 uv2, out float insideRatio)
+    {
+        int samples = 0;
+        int inside = 0;
+        Vector2 centroid = (uv0 + uv1 + uv2) / 3f;
+        Vector2 m01 = (uv0 + uv1) * 0.5f;
+        Vector2 m12 = (uv1 + uv2) * 0.5f;
+        Vector2 m20 = (uv2 + uv0) * 0.5f;
+        Vector2[] points = { centroid, m01, m12, m20 };
+        for (int i = 0; i < points.Length; i++)
+        {
+            Vector2 p = points[i];
+            if (float.IsNaN(p.x) || float.IsNaN(p.y) || float.IsInfinity(p.x) || float.IsInfinity(p.y))
+            {
+                continue;
+            }
+            if (AlphaMaskProcessor.SampleMask(maskData, p)) inside++;
+            samples++;
+        }
+        if (samples <= 0)
+        {
+            insideRatio = 0f;
+            return false;
+        }
+        insideRatio = (float)inside / samples;
+        return true;
+    }
+
+    private static void BuildFourBoundaryRegions(
+        int i0, int i1, int i2, BoundaryPoint p0, BoundaryPoint p1, BoundaryPoint p2, BoundaryPoint p3,
+        out List<int> rA, out List<int> rB, out List<int> rMid)
+    {
+        int[] tri = { i0, i1, i2 };
+        List<int> BuildCap(BoundaryPoint a, BoundaryPoint b)
+        {
+            var poly = new List<int>() { a.vertexIndex };
+            int e = a.edgeIndex;
+            while (true)
+            {
+                poly.Add(tri[(e + 1) % 3]);
+                if (e == b.edgeIndex) break;
+                e = (e + 1) % 3;
+            }
+            poly.Add(b.vertexIndex);
+            return poly;
+        }
+
+        rA = BuildCap(p0, p1);
+        rB = BuildCap(p2, p3);
+        rMid = new List<int>() { p1.vertexIndex };
+        int eMid = p1.edgeIndex;
+        while (true)
+        {
+            rMid.Add(tri[(eMid + 1) % 3]);
+            if (eMid == p2.edgeIndex) break;
+            eMid = (eMid + 1) % 3;
+        }
+        rMid.Add(p2.vertexIndex);
+        rMid.Add(p3.vertexIndex);
+        eMid = p3.edgeIndex;
+        while (true)
+        {
+            rMid.Add(tri[(eMid + 1) % 3]);
+            if (eMid == p0.edgeIndex) break;
+            eMid = (eMid + 1) % 3;
+        }
+        rMid.Add(p0.vertexIndex);
+    }
+
+    private static bool EstimateKeep(AlphaMaskProcessor.AlphaMaskData maskData, List<int> region, List<Vector2> uv)
+    {
+        int inside = 0;
+        int samples = 0;
+        for (int i = 0; i < region.Count; i++)
+        {
+            if (AlphaMaskProcessor.SampleMask(maskData, uv[region[i]])) inside++;
+            samples++;
+        }
+
+        Vector2 centroid = AverageUv(region, uv);
+        if (AlphaMaskProcessor.SampleMask(maskData, centroid)) inside++;
+        samples++;
+
+        for (int i = 0; i < region.Count; i++)
+        {
+            Vector2 a = uv[region[i]];
+            Vector2 b = uv[region[(i + 1) % region.Count]];
+            Vector2 mid = (a + b) * 0.5f;
+            if (AlphaMaskProcessor.SampleMask(maskData, mid)) inside++;
+            samples++;
+            Vector2 centerBlend = (mid + centroid) * 0.5f;
+            if (AlphaMaskProcessor.SampleMask(maskData, centerBlend)) inside++;
+            samples++;
+        }
+
+        return inside >= (samples * 0.5f);
+    }
+
+
+    private static Vector2 AverageUv(List<int> polygon, List<Vector2> uv)
+    {
+        Vector2 sum = Vector2.zero;
+        for (int i = 0; i < polygon.Count; i++) sum += uv[polygon[i]];
+        return sum / Mathf.Max(1, polygon.Count);
+    }
+
+    private static void TriangulateRegion(int srcA, int srcB, int srcC, List<int> poly, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, List<int> dstIndices, ref TrimStats stats)
+    {
+        if (poly == null || poly.Count < 3) return;
+
+        if (poly.Count == 3)
+        {
+            AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[1], poly[2], vertices, uv, trimmer, ref stats);
+            return;
+        }
+
+        if (TryTriangulateEarClipping(srcA, srcB, srcC, poly, vertices, uv, trimmer, dstIndices, ref stats))
+        {
+            return;
+        }
+
+        for (int i = 1; i < poly.Count - 1; i++)
+        {
+            AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, poly[0], poly[i], poly[i + 1], vertices, uv, trimmer, ref stats);
+        }
+    }
+
+    private static bool TryTriangulateEarClipping(int srcA, int srcB, int srcC, List<int> poly, List<Vector3> vertices, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, List<int> dstIndices, ref TrimStats stats)
+    {
+        var working = new List<int>(poly);
+        float area = 0f;
+        for (int i = 0; i < working.Count; i++)
+        {
+            Vector2 a = uv[working[i]];
+            Vector2 b = uv[working[(i + 1) % working.Count]];
+            area += (a.x * b.y) - (a.y * b.x);
+        }
+        bool ccw = area > 0f;
+        int guard = 0;
+        while (working.Count > 3 && guard++ < 64)
+        {
+            bool foundEar = false;
+            for (int i = 0; i < working.Count; i++)
+            {
+                int iPrev = working[(i - 1 + working.Count) % working.Count];
+                int iCurr = working[i];
+                int iNext = working[(i + 1) % working.Count];
+                float cross = SignedArea(uv[iPrev], uv[iCurr], uv[iNext]);
+                if (ccw ? cross <= 1e-8f : cross >= -1e-8f) continue;
+
+                bool contains = false;
+                for (int j = 0; j < working.Count; j++)
+                {
+                    int test = working[j];
+                    if (test == iPrev || test == iCurr || test == iNext) continue;
+                    if (PointInTriangleUv(uv[test], uv[iPrev], uv[iCurr], uv[iNext]))
+                    {
+                        contains = true;
+                        break;
+                    }
+                }
+                if (contains) continue;
+
+                AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, iPrev, iCurr, iNext, vertices, uv, trimmer, ref stats);
+                working.RemoveAt(i);
+                foundEar = true;
+                break;
+            }
+            if (!foundEar) return false;
+        }
+
+        if (working.Count == 3)
+        {
+            AddTrianglePreserveWinding(dstIndices, srcA, srcB, srcC, working[0], working[1], working[2], vertices, uv, trimmer, ref stats);
+            return true;
+        }
+        return false;
+    }
+
+    private static bool PointInTriangleUv(Vector2 p, Vector2 a, Vector2 b, Vector2 c)
+    {
+        float s1 = SignedArea(a, b, p);
+        float s2 = SignedArea(b, c, p);
+        float s3 = SignedArea(c, a, p);
+        bool hasNeg = (s1 < 0f) || (s2 < 0f) || (s3 < 0f);
+        bool hasPos = (s1 > 0f) || (s2 > 0f) || (s3 > 0f);
+        return !(hasNeg && hasPos);
     }
 
     private static void AddTrianglePreserveWinding(
