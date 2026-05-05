@@ -627,6 +627,15 @@ public static class MeshTrimProcessor
             }
         }
 
+        // Safety guard: if edge-crossing route analysis produced no split routes at all,
+        // or emitted nothing, prefer the stable legacy path for this submesh.
+        int splitRouteCount = stats.routeOneLine + stats.routeTwoLineOddOddEven + stats.routeTwoLineEvenEven;
+        if (stats.outputTriangles == 0 || splitRouteCount == 0)
+        {
+            return ProcessSubMeshLegacy(srcIndices, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, dstIndices);
+        }
+
         return stats;
     }
 
