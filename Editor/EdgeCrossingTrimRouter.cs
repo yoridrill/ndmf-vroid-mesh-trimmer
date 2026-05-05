@@ -148,26 +148,6 @@ internal static class EdgeCrossingTrimRouter
             insidePolygons = new[] { new[] { new PolygonVertexRef(splitCrossingA), new PolygonVertexRef(splitCrossingB) } };
         }
 
-        public TriangleProcessResult(LocalCrossing evenCrossingMin, LocalCrossing evenCrossingMax, LocalCrossing oddCrossing0, LocalCrossing oddCrossing1, bool pairingIsDirect, bool middleInside)
-        {
-            route = TriangleRoute.TwoOddEdgesAndOneEvenEdge;
-            keepWholeTriangle = false;
-            hasOneLineSplit = false;
-            splitCrossingA = default;
-            splitCrossingB = default;
-            keptInsideVertices = Array.Empty<int>();
-            hasTwoLineSplit = true;
-            this.evenCrossingMin = evenCrossingMin;
-            this.evenCrossingMax = evenCrossingMax;
-            this.oddCrossing0 = oddCrossing0;
-            this.oddCrossing1 = oddCrossing1;
-            this.pairingIsDirect = pairingIsDirect;
-            this.middleInside = middleInside;
-            evenBCrossingMin = default;
-            evenBCrossingMax = default;
-            insidePolygons = Array.Empty<PolygonVertexRef[]>();
-        }
-
         public TriangleProcessResult(LocalCrossing evenACrossingMin, LocalCrossing evenACrossingMax, LocalCrossing evenBCrossingMin, LocalCrossing evenBCrossingMax, bool pairingIsDirect, bool middleInside)
         {
             route = TriangleRoute.TwoEvenEdges;
