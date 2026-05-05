@@ -749,14 +749,15 @@ public static class MeshTrimProcessor
     private static Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>> BuildSharedCrossings(int[] srcIndices, AlphaMaskProcessor.AlphaMaskData maskData, List<Vector2> uv)
     {
         var shared = new Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>>();
+        var visited = new HashSet<EdgeCrossingTrimRouter.EdgeKey>();
         for (int i = 0; i < srcIndices.Length; i += 3)
         {
             int i0 = srcIndices[i];
             int i1 = srcIndices[i + 1];
             int i2 = srcIndices[i + 2];
-            RegisterEdgeCrossing(maskData, uv, i0, i1, shared);
-            RegisterEdgeCrossing(maskData, uv, i1, i2, shared);
-            RegisterEdgeCrossing(maskData, uv, i2, i0, shared);
+            RegisterEdgeCrossing(maskData, uv, i0, i1, shared, visited);
+            RegisterEdgeCrossing(maskData, uv, i1, i2, shared, visited);
+            RegisterEdgeCrossing(maskData, uv, i2, i0, shared, visited);
         }
         return shared;
     }
@@ -766,9 +767,11 @@ public static class MeshTrimProcessor
         List<Vector2> uv,
         int a,
         int b,
-        Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>> shared)
+        Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>> shared,
+        HashSet<EdgeCrossingTrimRouter.EdgeKey> visited)
     {
         var key = new EdgeCrossingTrimRouter.EdgeKey(a, b);
+        if (!visited.Add(key)) return;
         if (!shared.TryGetValue(key, out var list))
         {
             list = new List<EdgeCrossingTrimRouter.EdgeCrossing>(2);
