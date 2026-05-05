@@ -627,15 +627,6 @@ public static class MeshTrimProcessor
             }
         }
 
-        // Safety guard: if edge-crossing route analysis produced no split routes at all,
-        // or emitted nothing, prefer the stable legacy path for this submesh.
-        int splitRouteCount = stats.routeOneLine + stats.routeTwoLineOddOddEven + stats.routeTwoLineEvenEven;
-        if (stats.outputTriangles == 0 || splitRouteCount == 0)
-        {
-            return ProcessSubMeshLegacy(srcIndices, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, dstIndices);
-        }
-
         return stats;
     }
 
@@ -777,33 +768,50 @@ public static class MeshTrimProcessor
         int b,
         Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>> shared)
     {
-        Vector2 ua = uv[a];
-        Vector2 ub = uv[b];
-        bool inA = AlphaMaskProcessor.SampleMask(maskData, ua);
-        bool inB = AlphaMaskProcessor.SampleMask(maskData, ub);
-        if (inA == inB) return;
-
-        float lo = 0f;
-        float hi = 1f;
-        for (int it = 0; it < 18; it++)
-        {
-            float mid = (lo + hi) * 0.5f;
-            Vector2 um = Vector2.LerpUnclamped(ua, ub, mid);
-            bool inM = AlphaMaskProcessor.SampleMask(maskData, um);
-            if (inM == inA) lo = mid;
-            else hi = mid;
-        }
-
         var key = new EdgeCrossingTrimRouter.EdgeKey(a, b);
-        bool canonical = key.a == a && key.b == b;
-        float tCanonical = canonical ? hi : 1f - hi;
-        bool beforeInsideCanonical = canonical ? inA : inB;
         if (!shared.TryGetValue(key, out var list))
         {
-            list = new List<EdgeCrossingTrimRouter.EdgeCrossing>(1);
+            list = new List<EdgeCrossingTrimRouter.EdgeCrossing>(2);
             shared[key] = list;
         }
-        list.Add(new EdgeCrossingTrimRouter.EdgeCrossing { edge = key, t = tCanonical, isBeforeInside = beforeInsideCanonical });
+
+        Vector2 ua = uv[a];
+        Vector2 ub = uv[b];
+        const int samples = 32;
+        bool prevInside = AlphaMaskProcessor.SampleMask(maskData, ua);
+        float prevT = 0f;
+
+        for (int s = 1; s <= samples; s++)
+        {
+            float curT = (float)s / samples;
+            Vector2 curUv = Vector2.LerpUnclamped(ua, ub, curT);
+            bool curInside = AlphaMaskProcessor.SampleMask(maskData, curUv);
+            if (curInside == prevInside)
+            {
+                prevT = curT;
+                continue;
+            }
+
+            float lo = prevT;
+            float hi = curT;
+            bool loInside = prevInside;
+            for (int it = 0; it < 12; it++)
+            {
+                float mid = (lo + hi) * 0.5f;
+                Vector2 um = Vector2.LerpUnclamped(ua, ub, mid);
+                bool midInside = AlphaMaskProcessor.SampleMask(maskData, um);
+                if (midInside == loInside) lo = mid;
+                else hi = mid;
+            }
+
+            bool canonical = key.a == a && key.b == b;
+            float tCanonical = canonical ? hi : 1f - hi;
+            bool beforeInsideCanonical = canonical ? loInside : curInside;
+            list.Add(new EdgeCrossingTrimRouter.EdgeCrossing { edge = key, t = tCanonical, isBeforeInside = beforeInsideCanonical });
+
+            prevInside = curInside;
+            prevT = curT;
+        }
     }
 
     private static TrimStats ProcessSubMeshLegacy(
