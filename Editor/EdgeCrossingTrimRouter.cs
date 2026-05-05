@@ -168,43 +168,23 @@ internal static class EdgeCrossingTrimRouter
             insidePolygons = Array.Empty<PolygonVertexRef[]>();
         }
 
-        public TriangleProcessResult(LocalCrossing evenACrossingMin, LocalCrossing evenACrossingMax, LocalCrossing oddCrossing0, LocalCrossing oddCrossing1, bool pairingIsDirect, bool middleInside, PolygonVertexRef[][] insidePolygons)
+        public TriangleProcessResult(TriangleRoute route, LocalCrossing crossing0, LocalCrossing crossing1, LocalCrossing crossing2, LocalCrossing crossing3, bool pairingIsDirect, bool middleInside, PolygonVertexRef[][] insidePolygons)
         {
-            route = TriangleRoute.TwoOddEdgesAndOneEvenEdge;
+            this.route = route;
             keepWholeTriangle = false;
             hasOneLineSplit = false;
             splitCrossingA = default;
             splitCrossingB = default;
             keptInsideVertices = Array.Empty<int>();
             hasTwoLineSplit = true;
-            evenCrossingMin = evenACrossingMin;
-            evenCrossingMax = evenACrossingMax;
-            this.oddCrossing0 = oddCrossing0;
-            this.oddCrossing1 = oddCrossing1;
+            evenCrossingMin = crossing0;
+            evenCrossingMax = crossing1;
+            this.oddCrossing0 = route == TriangleRoute.TwoOddEdgesAndOneEvenEdge ? crossing2 : default;
+            this.oddCrossing1 = route == TriangleRoute.TwoOddEdgesAndOneEvenEdge ? crossing3 : default;
             this.pairingIsDirect = pairingIsDirect;
             this.middleInside = middleInside;
-            evenBCrossingMin = default;
-            evenBCrossingMax = default;
-            this.insidePolygons = insidePolygons ?? Array.Empty<PolygonVertexRef[]>();
-        }
-
-        public TriangleProcessResult(LocalCrossing evenACrossingMin, LocalCrossing evenACrossingMax, LocalCrossing evenBCrossingMin, LocalCrossing evenBCrossingMax, bool pairingIsDirect, bool middleInside, PolygonVertexRef[][] insidePolygons)
-        {
-            route = TriangleRoute.TwoEvenEdges;
-            keepWholeTriangle = false;
-            hasOneLineSplit = false;
-            splitCrossingA = default;
-            splitCrossingB = default;
-            keptInsideVertices = Array.Empty<int>();
-            hasTwoLineSplit = true;
-            evenCrossingMin = evenACrossingMin;
-            evenCrossingMax = evenACrossingMax;
-            oddCrossing0 = default;
-            oddCrossing1 = default;
-            this.pairingIsDirect = pairingIsDirect;
-            this.middleInside = middleInside;
-            this.evenBCrossingMin = evenBCrossingMin;
-            this.evenBCrossingMax = evenBCrossingMax;
+            evenBCrossingMin = route == TriangleRoute.TwoEvenEdges ? crossing2 : default;
+            evenBCrossingMax = route == TriangleRoute.TwoEvenEdges ? crossing3 : default;
             this.insidePolygons = insidePolygons ?? Array.Empty<PolygonVertexRef[]>();
         }
     }
@@ -378,7 +358,7 @@ internal static class EdgeCrossingTrimRouter
         bool middleInside = !a0.isBeforeInside && a1.isBeforeInside;
         var polygons = BuildInsidePolygonsForTwoOddOneEven(triangle, a0, a1, s0, s1, direct, middleInside);
         if (!ValidateInsidePolygons(triangle, polygons, epsilon)) return MakeWholeBySevenPointMajority(triangle);
-        return polygons == null ? MakeWholeBySevenPointMajority(triangle) : new TriangleProcessResult(a0, a1, s0, s1, direct, middleInside, polygons);
+        return polygons == null ? MakeWholeBySevenPointMajority(triangle) : new TriangleProcessResult(TriangleRoute.TwoOddEdgesAndOneEvenEdge, a0, a1, s0, s1, direct, middleInside, polygons);
     }
 
     internal static TriangleProcessResult ProcessTwoEvenEdges(TriangleContext triangle, List<EdgeInfo> edgeInfos)
@@ -415,7 +395,7 @@ internal static class EdgeCrossingTrimRouter
 
         var polygons = BuildInsidePolygonsForTwoEven(a0, a1, b0, b1, direct, middleA);
         if (!ValidateInsidePolygons(triangle, polygons, epsilon)) return MakeWholeBySevenPointMajority(triangle);
-        return polygons == null ? MakeWholeBySevenPointMajority(triangle) : new TriangleProcessResult(a0, a1, b0, b1, direct, middleA, polygons);
+        return polygons == null ? MakeWholeBySevenPointMajority(triangle) : new TriangleProcessResult(TriangleRoute.TwoEvenEdges, a0, a1, b0, b1, direct, middleA, polygons);
     }
 
     private static bool TryPickRepresentativeCrossing(List<EdgeInfo> edgeInfos, EdgeParityClass parityClass, int parityOrdinal, TriangleContext triangle, out LocalCrossing crossing)
