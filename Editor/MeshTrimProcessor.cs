@@ -1665,5 +1665,6 @@ public static class MeshTrimProcessor
         indices.Add(a);
         indices.Add(b);
         indices.Add(c);
+        stats.outputTriangles++;
     }
 }
