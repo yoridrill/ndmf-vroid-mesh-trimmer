@@ -255,7 +255,7 @@ public static class MeshTrimProcessor
                 hasBoneWeights,
                 vertexSources,
                 newSubMeshIndices[sub],
-                src.sharedMaterials != null && sub < src.sharedMaterials.Length && src.sharedMaterials[sub] != null ? src.sharedMaterials[sub].name : string.Empty);
+                renderer.sharedMaterials != null && sub < renderer.sharedMaterials.Length && renderer.sharedMaterials[sub] != null ? renderer.sharedMaterials[sub].name : string.Empty);
 
             stats.addedVertices = vertices.Count - baseVertexCount;
             baseVertexCount = vertices.Count;
