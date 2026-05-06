@@ -759,6 +759,17 @@ public static class MeshTrimProcessor
             RegisterEdgeCrossing(maskData, uv, i1, i2, shared, visited);
             RegisterEdgeCrossing(maskData, uv, i2, i0, shared, visited);
         }
+        foreach (var kv in shared)
+        {
+            kv.Value.Sort((x, y) => x.t.CompareTo(y.t));
+            for (int i = kv.Value.Count - 2; i >= 0; i--)
+            {
+                if (Mathf.Abs(kv.Value[i + 1].t - kv.Value[i].t) < 1e-4f)
+                {
+                    kv.Value.RemoveAt(i + 1);
+                }
+            }
+        }
         return shared;
     }
 
