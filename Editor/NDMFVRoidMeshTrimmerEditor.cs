@@ -158,6 +158,18 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         }
 
         EditorGUI.indentLevel++;
+        EditorGUILayout.PropertyField(
+            serializedObject.FindProperty("debugEdgeCrossingRoutes"),
+            new GUIContent(T("Verbose Log", "Verbose Log")));
+        EditorGUILayout.PropertyField(
+            serializedObject.FindProperty("edgeCrossingMergeEpsilon"),
+            new GUIContent(T("交点マージしきい値", "Crossing Merge Epsilon")));
+        EditorGUILayout.PropertyField(
+            serializedObject.FindProperty("edgeCrossingEndpointSnapEpsilon"),
+            new GUIContent(T("端点スナップしきい値", "Endpoint Snap Epsilon")));
+        EditorGUILayout.PropertyField(
+            serializedObject.FindProperty("edgeCrossingCacheQuantizeStep"),
+            new GUIContent(T("交点キャッシュ量子化", "Crossing Cache Quantize Step")));
         EditorGUILayout.HelpBox(T("Preview復旧用: 元参照へ戻します。", "Preview recovery: restore original renderer references."), MessageType.None);
         if (GUILayout.Button(T("Restore Originals", "Restore Originals")))
         {

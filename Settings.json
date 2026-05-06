@@ -1,5 +1,7 @@
 {
   "version": 1,
+  "trimAlgorithm": "edgeCrossing",
+  "debugEdgeCrossingLogMaterials": ["Iris"],
   "fillColors": [
     {
       "target": ["eyeline", "アイライン"],
