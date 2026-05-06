@@ -5,9 +5,6 @@ using UnityEngine.Rendering;
 
 public static class MeshTrimProcessor
 {
-    private const float MaxSafeCrossingMergeEpsilon = 0.01f;
-    private const float MaxSafeEndpointSnapEpsilon = 0.01f;
-    private const float MaxSafeCacheQuantizeStep = 0.01f;
     public struct VertexSource
     {
         public int index0; public float weight0;
@@ -576,18 +573,6 @@ public static class MeshTrimProcessor
         List<int> dstIndices,
         string debugMaterialName)
     {
-        if (trimmer != null)
-        {
-            if (trimmer.edgeCrossingMergeEpsilon > MaxSafeCrossingMergeEpsilon ||
-                trimmer.edgeCrossingEndpointSnapEpsilon > MaxSafeEndpointSnapEpsilon ||
-                trimmer.edgeCrossingCacheQuantizeStep > MaxSafeCacheQuantizeStep)
-            {
-                Debug.LogWarning($"[NDMF VRoid Mesh Trimmer] Edge-crossing tuning values are clamped internally for stability. " +
-                    $"merge={trimmer.edgeCrossingMergeEpsilon:F5}->{Mathf.Clamp(trimmer.edgeCrossingMergeEpsilon, 0.00001f, MaxSafeCrossingMergeEpsilon):F5}, " +
-                    $"snap={trimmer.edgeCrossingEndpointSnapEpsilon:F5}->{Mathf.Clamp(trimmer.edgeCrossingEndpointSnapEpsilon, 0.00001f, MaxSafeEndpointSnapEpsilon):F5}, " +
-                    $"quantize={trimmer.edgeCrossingCacheQuantizeStep:F5}->{Mathf.Clamp(trimmer.edgeCrossingCacheQuantizeStep, 0.00001f, MaxSafeCacheQuantizeStep):F5}");
-            }
-        }
         var shared = BuildSharedCrossings(srcIndices, maskData, uv, trimmer);
         TrimStats stats = new TrimStats();
         var crossingVertexCache = new Dictionary<(int, int, float), int>();
@@ -603,6 +588,25 @@ public static class MeshTrimProcessor
                 sharedCrossings = shared,
                 SampleInside = u => AlphaMaskProcessor.SampleMask(maskData, u)
             };
+            if (!HasAnyCrossingForTriangle(shared, i0, i1, i2))
+            {
+                int insideCount = 0;
+                if (AlphaMaskProcessor.SampleMask(maskData, uv[i0])) insideCount++;
+                if (AlphaMaskProcessor.SampleMask(maskData, uv[i1])) insideCount++;
+                if (AlphaMaskProcessor.SampleMask(maskData, uv[i2])) insideCount++;
+                stats.originalTriangles++;
+                if (insideCount >= 2)
+                {
+                    stats.routeWholeKeep++;
+                    AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats, skipAreaThresholds: true);
+                }
+                else
+                {
+                    stats.routeWholeTrim++;
+                    stats.removedTriangles++;
+                }
+                continue;
+            }
             var result = EdgeCrossingTrimRouter.ProcessTriangle(ctx);
             string majorityFallbackReason = "none";
             stats.originalTriangles++;
@@ -772,7 +776,7 @@ public static class MeshTrimProcessor
         int a = Mathf.Min(crossing.edgeStart, crossing.edgeEnd);
         int b = Mathf.Max(crossing.edgeStart, crossing.edgeEnd);
         float t = crossing.edgeStart <= crossing.edgeEnd ? crossing.t : 1f - crossing.t;
-        float quantizeStep = trimmer != null ? Mathf.Clamp(trimmer.edgeCrossingCacheQuantizeStep, 0.00001f, MaxSafeCacheQuantizeStep) : 0.001f;
+        float quantizeStep = trimmer != null ? Mathf.Max(0.00001f, trimmer.edgeCrossingCacheQuantizeStep) : 0.001f;
         var key = (a, b, Mathf.Round(t / quantizeStep) * quantizeStep);
         if (cache.TryGetValue(key, out int idx)) return idx;
         int newIndex = AddInterpolatedVertex(crossing.edgeStart, crossing.edgeEnd, crossing.t, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
@@ -832,7 +836,7 @@ public static class MeshTrimProcessor
             RegisterEdgeCrossing(maskData, uv, i1, i2, shared, visited, trimmer);
             RegisterEdgeCrossing(maskData, uv, i2, i0, shared, visited, trimmer);
         }
-        float mergeEpsilon = trimmer != null ? Mathf.Clamp(trimmer.edgeCrossingMergeEpsilon, 0.00001f, MaxSafeCrossingMergeEpsilon) : 0.001f;
+        float mergeEpsilon = trimmer != null ? Mathf.Max(0.00001f, trimmer.edgeCrossingMergeEpsilon) : 0.001f;
         foreach (var kv in shared)
         {
             kv.Value.Sort((x, y) => x.t.CompareTo(y.t));
@@ -845,6 +849,21 @@ public static class MeshTrimProcessor
             }
         }
         return shared;
+    }
+
+    private static bool HasAnyCrossingForTriangle(
+        Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>> shared,
+        int i0, int i1, int i2)
+    {
+        return HasCrossing(shared, i0, i1) || HasCrossing(shared, i1, i2) || HasCrossing(shared, i2, i0);
+    }
+
+    private static bool HasCrossing(
+        Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>> shared,
+        int a, int b)
+    {
+        var key = new EdgeCrossingTrimRouter.EdgeKey(a, b);
+        return shared.TryGetValue(key, out var list) && list != null && list.Count > 0;
     }
 
     private static void RegisterEdgeCrossing(
@@ -867,7 +886,7 @@ public static class MeshTrimProcessor
         Vector2 ua = uv[a];
         Vector2 ub = uv[b];
         const int samples = 32;
-        float endpointSnapEpsilon = trimmer != null ? Mathf.Clamp(trimmer.edgeCrossingEndpointSnapEpsilon, 0.00001f, MaxSafeEndpointSnapEpsilon) : 0.001f;
+        float endpointSnapEpsilon = trimmer != null ? Mathf.Max(0.00001f, trimmer.edgeCrossingEndpointSnapEpsilon) : 0.001f;
         bool prevInside = AlphaMaskProcessor.SampleMask(maskData, ua);
         float prevT = 0f;
 
