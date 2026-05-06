@@ -728,17 +728,16 @@ public static class MeshTrimProcessor
         if (result.keptInsideVertices == null || result.keptInsideVertices.Length == 0) return false;
         if (result.keptInsideVertices.Length == 1)
         {
-            AddTrianglePreserveWinding(dstIndices, i0, i1, i2, result.keptInsideVertices[0], cutA, cutB, vertices, uv, trimmer, ref stats);
-            return true;
+            return AddTrianglePreserveWinding(dstIndices, i0, i1, i2, result.keptInsideVertices[0], cutA, cutB, vertices, uv, trimmer, ref stats);
         }
 
         if (result.keptInsideVertices.Length == 2)
         {
             int a = result.keptInsideVertices[0];
             int b = result.keptInsideVertices[1];
-            AddTrianglePreserveWinding(dstIndices, i0, i1, i2, a, b, cutA, vertices, uv, trimmer, ref stats);
-            AddTrianglePreserveWinding(dstIndices, i0, i1, i2, b, cutB, cutA, vertices, uv, trimmer, ref stats);
-            return true;
+            bool emittedA = AddTrianglePreserveWinding(dstIndices, i0, i1, i2, a, b, cutA, vertices, uv, trimmer, ref stats);
+            bool emittedB = AddTrianglePreserveWinding(dstIndices, i0, i1, i2, b, cutB, cutA, vertices, uv, trimmer, ref stats);
+            return emittedA || emittedB;
         }
 
         return false;
@@ -793,8 +792,10 @@ public static class MeshTrimProcessor
 
             for (int k = 1; k + 1 < indices.Count; k++)
             {
-                AddTrianglePreserveWinding(dstIndices, i0, i1, i2, indices[0], indices[k], indices[k + 1], vertices, uv, trimmer, ref stats);
-                emitted = true;
+                if (AddTrianglePreserveWinding(dstIndices, i0, i1, i2, indices[0], indices[k], indices[k + 1], vertices, uv, trimmer, ref stats))
+                {
+                    emitted = true;
+                }
             }
         }
         return emitted;
@@ -1671,7 +1672,7 @@ public static class MeshTrimProcessor
         }
     }
 
-    private static void AddTrianglePreserveWinding(
+    private static bool AddTrianglePreserveWinding(
         List<int> indices,
         int srcA,
         int srcB,
@@ -1693,10 +1694,10 @@ public static class MeshTrimProcessor
             c = tmp;
         }
 
-        AddTriangle(indices, a, b, c, vertices, uv, trimmer, ref stats);
+        return AddTriangle(indices, a, b, c, vertices, uv, trimmer, ref stats);
     }
 
-    private static void AddTriangle(
+    private static bool AddTriangle(
         List<int> indices,
         int a,
         int b,
@@ -1710,7 +1711,7 @@ public static class MeshTrimProcessor
         if (a == b || b == c || c == a)
         {
             stats.removedTriangles++;
-            return;
+            return false;
         }
 
         Vector2 uva = uv[a];
@@ -1723,14 +1724,14 @@ public static class MeshTrimProcessor
             if (uvArea < trimmer.minTriangleUvArea)
             {
                 stats.removedTriangles++;
-                return;
+                return false;
             }
 
             float worldArea = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).magnitude * 0.5f;
             if (worldArea < trimmer.minTriangleWorldArea)
             {
                 stats.removedTriangles++;
-                return;
+                return false;
             }
         }
 
@@ -1738,5 +1739,6 @@ public static class MeshTrimProcessor
         indices.Add(b);
         indices.Add(c);
         stats.outputTriangles++;
+        return true;
     }
 }
