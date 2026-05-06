@@ -756,7 +756,7 @@ public static class MeshTrimProcessor
         int a = Mathf.Min(crossing.edgeStart, crossing.edgeEnd);
         int b = Mathf.Max(crossing.edgeStart, crossing.edgeEnd);
         float t = crossing.edgeStart <= crossing.edgeEnd ? crossing.t : 1f - crossing.t;
-        var key = (a, b, Mathf.Round(t * 100000f) / 100000f);
+        var key = (a, b, Mathf.Round(t * 1000f) / 1000f);
         if (cache.TryGetValue(key, out int idx)) return idx;
         int newIndex = AddInterpolatedVertex(crossing.edgeStart, crossing.edgeEnd, crossing.t, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
             hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
@@ -815,12 +815,13 @@ public static class MeshTrimProcessor
             RegisterEdgeCrossing(maskData, uv, i1, i2, shared, visited);
             RegisterEdgeCrossing(maskData, uv, i2, i0, shared, visited);
         }
+        const float mergeEpsilon = 1e-3f;
         foreach (var kv in shared)
         {
             kv.Value.Sort((x, y) => x.t.CompareTo(y.t));
             for (int i = kv.Value.Count - 2; i >= 0; i--)
             {
-                if (Mathf.Abs(kv.Value[i + 1].t - kv.Value[i].t) < 1e-4f)
+                if (Mathf.Abs(kv.Value[i + 1].t - kv.Value[i].t) < mergeEpsilon)
                 {
                     kv.Value.RemoveAt(i + 1);
                 }
@@ -848,6 +849,7 @@ public static class MeshTrimProcessor
         Vector2 ua = uv[a];
         Vector2 ub = uv[b];
         const int samples = 32;
+        const float endpointSnapEpsilon = 1e-3f;
         bool prevInside = AlphaMaskProcessor.SampleMask(maskData, ua);
         float prevT = 0f;
 
@@ -876,6 +878,8 @@ public static class MeshTrimProcessor
 
             bool canonical = key.a == a && key.b == b;
             float tCanonical = canonical ? hi : 1f - hi;
+            if (tCanonical < endpointSnapEpsilon) tCanonical = 0f;
+            else if (tCanonical > 1f - endpointSnapEpsilon) tCanonical = 1f;
             bool beforeInsideCanonical = canonical ? loInside : !loInside;
             list.Add(new EdgeCrossingTrimRouter.EdgeCrossing { edge = key, t = tCanonical, isBeforeInside = beforeInsideCanonical });
 
