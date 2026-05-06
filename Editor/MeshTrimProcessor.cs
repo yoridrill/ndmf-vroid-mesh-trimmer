@@ -592,8 +592,9 @@ public static class MeshTrimProcessor
             stats.originalTriangles++;
             if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeKeep)
             {
-                stats.routeWholeKeep++;
+                int beforeOut = stats.outputTriangles;
                 AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+                if (stats.outputTriangles > beforeOut) stats.routeWholeKeep++;
             }
             else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeTrim)
             {
