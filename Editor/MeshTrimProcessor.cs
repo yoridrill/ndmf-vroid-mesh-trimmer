@@ -81,7 +81,7 @@ public static class MeshTrimProcessor
         public int singleEdgeMidpointAndCentroidInsidePreserved;
         public int twoEdgeMidpointsInsideClipped;
         public int allEdgeMidpointsInsidePreserved;
-        public int fallbackPreserved;
+        public int insidePointFallbackPreserved;
         public int routeWholeKeep;
         public int routeWholeTrim;
         public int routeOneLine;
@@ -269,7 +269,7 @@ public static class MeshTrimProcessor
                       $"AllInsideButInteriorOutside={stats.allInsideButInteriorOutside}, AllOutsideButInteriorInside={stats.allOutsideButInteriorInside}, " +
                       $"CentroidOnlyInsidePreserved={stats.centroidOnlyInsidePreserved}, SingleEdgeMidpointInsideDiscarded={stats.singleEdgeMidpointInsideDiscarded}, " +
                       $"SingleEdgeMidpointAndCentroidInsidePreserved={stats.singleEdgeMidpointAndCentroidInsidePreserved}, TwoEdgeMidpointsInsideClipped={stats.twoEdgeMidpointsInsideClipped}, " +
-                      $"AllEdgeMidpointsInsidePreserved={stats.allEdgeMidpointsInsidePreserved}, FallbackPreserved={stats.fallbackPreserved}{routeInfo}, " +
+                      $"AllEdgeMidpointsInsidePreserved={stats.allEdgeMidpointsInsidePreserved}, InsidePointFallbackPreserved={stats.insidePointFallbackPreserved}{routeInfo}, " +
                       $"TrianglesAfterTrim={stats.outputTriangles}");
         }
 
@@ -535,9 +535,10 @@ public static class MeshTrimProcessor
         List<int> dstIndices,
         string debugMaterialName)
     {
+        // LegacyInsidePoint = existing advanced inside-point route (not 7-point majority fallback).
         if (trimmer != null && trimmer.trimAlgorithm == NDMFVRoidMeshTrimmer.TrimAlgorithm.LegacyInsidePoint)
         {
-            return ProcessSubMeshLegacy(srcIndices, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+            return ProcessSubMeshInsidePoint(srcIndices, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                 hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, dstIndices);
         }
 
@@ -610,7 +611,7 @@ public static class MeshTrimProcessor
                     {
                         stats.routeMajorityFallback++;
                         majorityFallbackReason = "emit_one_line_failed";
-                        EmitSevenPointMajorityTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
+                        EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
                     }
                 }
                 else if ((result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges) && result.hasTwoLineSplit)
@@ -622,14 +623,14 @@ public static class MeshTrimProcessor
                     {
                         stats.routeMajorityFallback++;
                         majorityFallbackReason = "emit_two_line_failed";
-                        EmitSevenPointMajorityTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
+                        EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
                     }
                 }
                 else
                 {
                     stats.routeMajorityFallback++;
                     majorityFallbackReason = "route_or_payload_unexpected";
-                    EmitSevenPointMajorityTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
+                    EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
                 }
             }
             if (trimmer != null && trimmer.debugEdgeCrossingRoutes && ShouldEmitEdgeRouteDebugForMaterial(trimmer, debugMaterialName))
@@ -684,7 +685,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer][EdgeRouteDebug] tri={triId} {parts[0]} {parts[1]} {parts[2]} route={result.route} fallback={majorityFallbackReason}");
     }
 
-    private static void EmitSevenPointMajorityTriangle(
+    private static void EmitMajority7PointTriangle(
         AlphaMaskProcessor.AlphaMaskData maskData,
         NDMFVRoidMeshTrimmer trimmer,
         int i0, int i1, int i2,
@@ -883,7 +884,7 @@ public static class MeshTrimProcessor
         }
     }
 
-    private static TrimStats ProcessSubMeshLegacy(
+    private static TrimStats ProcessSubMeshInsidePoint(
         int[] srcIndices,
         AlphaMaskProcessor.AlphaMaskData maskData,
         NDMFVRoidMeshTrimmer trimmer,
@@ -1075,7 +1076,7 @@ public static class MeshTrimProcessor
                 else
                 {
                     AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                    stats.fallbackPreserved++;
+                    stats.insidePointFallbackPreserved++;
                     triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 2));
                     continue;
                 }
@@ -1092,7 +1093,7 @@ public static class MeshTrimProcessor
                         ref stats, out int cutB))
                 {
                     AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                    stats.fallbackPreserved++;
+                    stats.insidePointFallbackPreserved++;
                     triangleResults.Add(BuildResult(triIndex, TriangleTrimState.Ambiguous, i0, i1, i2, uv, 1f, 2));
                     continue;
                 }
