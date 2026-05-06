@@ -158,6 +158,9 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         }
 
         EditorGUI.indentLevel++;
+        EditorGUILayout.PropertyField(
+            serializedObject.FindProperty("debugEdgeCrossingRoutes"),
+            new GUIContent(T("Verbose Log", "Verbose Log")));
         EditorGUILayout.HelpBox(T("Preview復旧用: 元参照へ戻します。", "Preview recovery: restore original renderer references."), MessageType.None);
         if (GUILayout.Button(T("Restore Originals", "Restore Originals")))
         {
