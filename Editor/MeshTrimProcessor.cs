@@ -780,9 +780,7 @@ public static class MeshTrimProcessor
 
         Vector2 ua = uv[a];
         Vector2 ub = uv[b];
-        float uvLength = Vector2.Distance(ua, ub);
-        int texScale = Mathf.Max(maskData.width, maskData.height);
-        int samples = Mathf.Clamp(Mathf.CeilToInt(uvLength * texScale * 2f), 32, 256);
+        const int samples = 32;
         bool prevInside = AlphaMaskProcessor.SampleMask(maskData, ua);
         float prevT = 0f;
 

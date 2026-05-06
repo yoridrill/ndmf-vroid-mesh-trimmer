@@ -488,8 +488,7 @@ internal static class EdgeCrossingTrimRouter
         bool endInside = SampleVertexInside(triangle, crossing.edgeEnd);
         if (startInside == endInside) return false;
         int expectedInside = startInside ? crossing.edgeStart : crossing.edgeEnd;
-        if (crossing.InsideVertex != expectedInside) return false;
-        return crossing.t > 0f && crossing.t < 1f;
+        return crossing.InsideVertex == expectedInside;
     }
 
     private static bool SegmentsProperlyIntersect(Vector2 a, Vector2 b, Vector2 c, Vector2 d, float epsilon)
