@@ -17,6 +17,9 @@ public static class AutoFillColorResolver
         public PreSubdivideRule[] preSubdivide;
         public string trimAlgorithm;
         public string[] debugEdgeCrossingLogMaterials;
+        public float edgeCrossingMergeEpsilon;
+        public float edgeCrossingEndpointSnapEpsilon;
+        public float edgeCrossingCacheQuantizeStep;
     }
 
     [Serializable]
@@ -68,6 +71,7 @@ public static class AutoFillColorResolver
 
         ApplyTrimAlgorithmRule(config, trimmer);
         ApplyEdgeRouteDebugFilterRule(config, trimmer);
+        ApplyEdgeCrossingTuningRule(config, trimmer);
 
         ApplyPreSubdivideRules(config, targets);
 
@@ -143,6 +147,14 @@ public static class AutoFillColorResolver
             if (string.IsNullOrWhiteSpace(v)) continue;
             trimmer.debugEdgeCrossingRouteMaterialFilters.Add(v.Trim());
         }
+    }
+
+    private static void ApplyEdgeCrossingTuningRule(FillColorConfig config, NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (trimmer == null) return;
+        if (config.edgeCrossingMergeEpsilon > 0f) trimmer.edgeCrossingMergeEpsilon = config.edgeCrossingMergeEpsilon;
+        if (config.edgeCrossingEndpointSnapEpsilon > 0f) trimmer.edgeCrossingEndpointSnapEpsilon = config.edgeCrossingEndpointSnapEpsilon;
+        if (config.edgeCrossingCacheQuantizeStep > 0f) trimmer.edgeCrossingCacheQuantizeStep = config.edgeCrossingCacheQuantizeStep;
     }
 
     private static bool TryMatchTarget(NDMFVRoidMeshTrimmer.TextureTargetSettings settings, string[] targetCandidates)
