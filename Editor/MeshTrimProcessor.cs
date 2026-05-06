@@ -585,6 +585,10 @@ public static class MeshTrimProcessor
                 SampleInside = u => AlphaMaskProcessor.SampleMask(maskData, u)
             };
             var result = EdgeCrossingTrimRouter.ProcessTriangle(ctx);
+            if (trimmer != null && trimmer.debugEdgeCrossingRoutes)
+            {
+                LogEdgeRouteTriangleDebug(i / 3, ctx, shared, result, "none");
+            }
             stats.originalTriangles++;
             if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeKeep)
             {
@@ -628,6 +632,33 @@ public static class MeshTrimProcessor
         }
 
         return stats;
+    }
+
+    private static void LogEdgeRouteTriangleDebug(
+        int triId,
+        EdgeCrossingTrimRouter.TriangleContext ctx,
+        Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>> shared,
+        EdgeCrossingTrimRouter.TriangleProcessResult result,
+        string fallbackReason)
+    {
+        int[] s = { ctx.v0, ctx.v1, ctx.v2 };
+        int[] e = { ctx.v1, ctx.v2, ctx.v0 };
+        var edgeInfos = EdgeCrossingTrimRouter.BuildEdgeInfos(ctx);
+        string[] parts = new string[3];
+        for (int i = 0; i < 3; i++)
+        {
+            var key = new EdgeCrossingTrimRouter.EdgeKey(s[i], e[i]);
+            int beforeCount = shared.TryGetValue(key, out var raw) ? raw.Count : 0;
+            var info = edgeInfos[i];
+            string tlist = "";
+            for (int k = 0; k < info.crossings.Count; k++)
+            {
+                if (k > 0) tlist += ",";
+                tlist += $"{info.crossings[k].t:F4}:{(info.crossings[k].isBeforeInside ? "1" : "0")}";
+            }
+            parts[i] = $"e{i}[{s[i]}-{e[i]}] before={beforeCount} after={info.crossings.Count} t=[{tlist}]";
+        }
+        Debug.Log($"[NDMF VRoid Mesh Trimmer][EdgeRouteDebug] tri={triId} {parts[0]} {parts[1]} {parts[2]} route={result.route} fallback={fallbackReason}");
     }
 
     private static void EmitSevenPointMajorityTriangle(

@@ -225,6 +225,7 @@ internal static class EdgeCrossingTrimRouter
         {
             var info = infos[i];
             info.crossings.Sort((x, y) => x.t.CompareTo(y.t));
+            NormalizeCrossingsInPlace(info.crossings);
             info.parityClass = ClassifyEdge(info.crossings.Count);
             infos[i] = info;
         }
@@ -238,20 +239,11 @@ internal static class EdgeCrossingTrimRouter
         int odd = 0;
         int even = 0;
         int zero = 0;
-        int ge2 = 0;
         for (int i = 0; i < edgeInfos.Count; i++)
         {
             if (edgeInfos[i].parityClass == EdgeParityClass.OddEdge) odd++;
             else if (edgeInfos[i].parityClass == EdgeParityClass.EvenEdge) even++;
             else zero++;
-            if (edgeInfos[i].crossings.Count >= 2) ge2++;
-        }
-
-        // Recovery path: if exactly one edge has zero crossings and the other two have at least two crossings,
-        // treat as two-line even-like case using min/max representatives.
-        if (zero == 1 && ge2 == 2)
-        {
-            return ProcessTwoEvenEdges(triangle, edgeInfos);
         }
 
         if (odd == 2 && even == 0) return ProcessTwoOddEdgesAsOneLine(triangle, edgeInfos);
@@ -637,6 +629,23 @@ internal static class EdgeCrossingTrimRouter
         if (crossingCount == 0) return EdgeParityClass.ZeroEdge;
         if ((crossingCount & 1) == 1) return EdgeParityClass.OddEdge;
         return EdgeParityClass.EvenEdge;
+    }
+
+    private static void NormalizeCrossingsInPlace(List<LocalCrossing> crossings)
+    {
+        if (crossings == null || crossings.Count == 0) return;
+        const float endpointEps = 1e-4f;
+        const float pairEps = 1e-3f;
+        crossings.RemoveAll(c => c.t <= endpointEps || c.t >= 1f - endpointEps);
+        for (int i = crossings.Count - 2; i >= 0; i--)
+        {
+            if (Mathf.Abs(crossings[i + 1].t - crossings[i].t) < pairEps)
+            {
+                crossings.RemoveAt(i + 1);
+                crossings.RemoveAt(i);
+                i--;
+            }
+        }
     }
 
     private static void AppendEdgeLocalCrossings(TriangleContext triangle, int edgeIndex, int edgeStart, int edgeEnd, List<LocalCrossing> dst)
