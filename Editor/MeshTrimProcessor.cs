@@ -87,6 +87,7 @@ public static class MeshTrimProcessor
         public int routeOneLine;
         public int routeTwoLineOddOddEven;
         public int routeTwoLineEvenEven;
+        public int routeLegacyFallback;
     }
 
     public static void ApplyTrim(NDMFVRoidMeshTrimmer trimmer)
@@ -260,7 +261,7 @@ public static class MeshTrimProcessor
             baseVertexCount = vertices.Count;
 
             string routeInfo = trimmer != null && trimmer.debugEdgeCrossingRoutes
-                ? $", RouteWholeKeep={stats.routeWholeKeep}, RouteWholeTrim={stats.routeWholeTrim}, RouteOneLine={stats.routeOneLine}, RouteTwoLineOddOddEven={stats.routeTwoLineOddOddEven}, RouteTwoLineEvenEven={stats.routeTwoLineEvenEven}"
+                ? $", RouteWholeKeep={stats.routeWholeKeep}, RouteWholeTrim={stats.routeWholeTrim}, RouteOneLine={stats.routeOneLine}, RouteTwoLineOddOddEven={stats.routeTwoLineOddOddEven}, RouteTwoLineEvenEven={stats.routeTwoLineEvenEven}, RouteLegacyFallback={stats.routeLegacyFallback}"
                 : string.Empty;
             Debug.Log($"[NDMF VRoid Mesh Trimmer] Renderer={renderer.name}, SubMesh={sub}, Texture={task.texture.name}, PreSubdivideEnabled={task.enablePreSubdivide}, PreSubdivideLevel={task.preSubdivideLevel}, QuadAware={task.preSubdivideQuadAware}, QuadCandidates={quadCandidates}, AcceptedQuads={acceptedQuads}, RejectedQuadCandidates={rejectedQuads}, TriangleFallbackCount={triFallback}, TrianglesBeforePreSubdivide={triBeforeSub}, TrianglesAfterPreSubdivide={workingIndices.Length / 3}, PreSubdivideAddedVertices={preAddedVertices}, PreSubdivideMs={swPre.ElapsedMilliseconds}, " +
                       $"OriginalTriangles={stats.originalTriangles}, OutputTriangles={stats.outputTriangles}, RemovedTriangles={stats.removedTriangles}, " +
@@ -607,8 +608,9 @@ public static class MeshTrimProcessor
                     if (!TryEmitOneLineSplit(result, i0, i1, i2, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                         hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, crossingVertexCache, dstIndices, ref stats))
                     {
+                        stats.routeLegacyFallback++;
                         fallbackReason = "emit_one_line_failed";
-                        stats.removedTriangles++;
+                        EmitSevenPointMajorityTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
                     }
                 }
                 else if ((result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges) && result.hasTwoLineSplit)
@@ -618,14 +620,16 @@ public static class MeshTrimProcessor
                     if (!TryEmitInsidePolygons(result, i0, i1, i2, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                         hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, crossingVertexCache, dstIndices, ref stats))
                     {
+                        stats.routeLegacyFallback++;
                         fallbackReason = "emit_two_line_failed";
-                        stats.removedTriangles++;
+                        EmitSevenPointMajorityTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
                     }
                 }
                 else
                 {
+                    stats.routeLegacyFallback++;
                     fallbackReason = "route_or_payload_unexpected";
-                    stats.removedTriangles++;
+                    EmitSevenPointMajorityTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
                 }
             }
             if (trimmer != null && trimmer.debugEdgeCrossingRoutes && ShouldEmitEdgeRouteDebugForMaterial(trimmer, debugMaterialName))
@@ -678,6 +682,30 @@ public static class MeshTrimProcessor
             parts[i] = $"e{i}[{s[i]}-{e[i]}] before={beforeCount} after={info.crossings.Count} t=[{tlist}]";
         }
         Debug.Log($"[NDMF VRoid Mesh Trimmer][EdgeRouteDebug] tri={triId} {parts[0]} {parts[1]} {parts[2]} route={result.route} fallback={fallbackReason}");
+    }
+
+    private static void EmitSevenPointMajorityTriangle(
+        AlphaMaskProcessor.AlphaMaskData maskData,
+        NDMFVRoidMeshTrimmer trimmer,
+        int i0, int i1, int i2,
+        List<Vector3> vertices,
+        List<Vector2> uv,
+        List<int> dstIndices,
+        ref TrimStats stats)
+    {
+        Vector2 uv0 = uv[i0];
+        Vector2 uv1 = uv[i1];
+        Vector2 uv2 = uv[i2];
+        int inside = 0;
+        if (AlphaMaskProcessor.SampleMask(maskData, uv0)) inside++;
+        if (AlphaMaskProcessor.SampleMask(maskData, uv1)) inside++;
+        if (AlphaMaskProcessor.SampleMask(maskData, uv2)) inside++;
+        if (AlphaMaskProcessor.SampleMask(maskData, (uv0 + uv1) * 0.5f)) inside++;
+        if (AlphaMaskProcessor.SampleMask(maskData, (uv1 + uv2) * 0.5f)) inside++;
+        if (AlphaMaskProcessor.SampleMask(maskData, (uv2 + uv0) * 0.5f)) inside++;
+        if (AlphaMaskProcessor.SampleMask(maskData, (uv0 + uv1 + uv2) / 3f)) inside++;
+        if (inside >= 4) AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+        else stats.removedTriangles++;
     }
 
     private static bool TryEmitOneLineSplit(
