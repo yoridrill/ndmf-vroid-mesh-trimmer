@@ -299,7 +299,7 @@ internal static class EdgeCrossingTrimRouter
         {
             return MakeWholeBySevenPointMajority(triangle);
         }
-        if (!IsRepresentativeConsistent(triangle, a) || !IsRepresentativeConsistent(triangle, b))
+        if (!IsOddRepresentativeConsistent(triangle, a) || !IsOddRepresentativeConsistent(triangle, b))
         {
             return MakeWholeBySevenPointMajority(triangle);
         }
@@ -330,7 +330,9 @@ internal static class EdgeCrossingTrimRouter
             return MakeWholeBySevenPointMajority(triangle);
         if (!TryPickRepresentativeCrossing(edgeInfos, EdgeParityClass.OddEdge, 1, triangle, out LocalCrossing s1))
             return MakeWholeBySevenPointMajority(triangle);
-        if (!IsRepresentativeConsistent(triangle, a0) || !IsRepresentativeConsistent(triangle, a1) || !IsRepresentativeConsistent(triangle, s0) || !IsRepresentativeConsistent(triangle, s1))
+        // Odd-edge representatives must be consistent with endpoint inside/outside states.
+        // Even-edge representatives may come from edges whose endpoints are same-side, so skip that check for a0/a1.
+        if (!IsOddRepresentativeConsistent(triangle, s0) || !IsOddRepresentativeConsistent(triangle, s1))
             return MakeWholeBySevenPointMajority(triangle);
 
         const float epsilon = 1e-6f;
@@ -367,8 +369,7 @@ internal static class EdgeCrossingTrimRouter
             return MakeWholeBySevenPointMajority(triangle);
         if (!TryPickRepresentativePair(edgeInfos, EdgeParityClass.EvenEdge, 1, out LocalCrossing b0, out LocalCrossing b1))
             return MakeWholeBySevenPointMajority(triangle);
-        if (!IsRepresentativeConsistent(triangle, a0) || !IsRepresentativeConsistent(triangle, a1) || !IsRepresentativeConsistent(triangle, b0) || !IsRepresentativeConsistent(triangle, b1))
-            return MakeWholeBySevenPointMajority(triangle);
+        // Even-edge route: endpoints can be same-side by definition, so odd consistency check does not apply.
 
         bool middleA = !a0.isBeforeInside && a1.isBeforeInside;
         bool middleB = !b0.isBeforeInside && b1.isBeforeInside;
@@ -481,7 +482,7 @@ internal static class EdgeCrossingTrimRouter
         return Vector2.LerpUnclamped(s, e, crossing.t);
     }
 
-    private static bool IsRepresentativeConsistent(TriangleContext triangle, LocalCrossing crossing)
+    private static bool IsOddRepresentativeConsistent(TriangleContext triangle, LocalCrossing crossing)
     {
         bool startInside = SampleVertexInside(triangle, crossing.edgeStart);
         bool endInside = SampleVertexInside(triangle, crossing.edgeEnd);
