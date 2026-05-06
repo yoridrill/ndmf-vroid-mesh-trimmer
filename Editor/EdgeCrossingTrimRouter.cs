@@ -379,7 +379,13 @@ internal static class EdgeCrossingTrimRouter
 
         bool direct = a0.InsideVertex == b0.InsideVertex && a1.InsideVertex == b1.InsideVertex;
         bool cross = a0.InsideVertex == b1.InsideVertex && a1.InsideVertex == b0.InsideVertex;
-        if (direct == cross) return MakeWholeBySevenPointMajority(triangle);
+        if (direct == cross)
+        {
+            if (!TryResolveTwoEvenPairingBySharedVertex(a0, a1, b0, b1, out direct))
+            {
+                return MakeWholeBySevenPointMajority(triangle);
+            }
+        }
 
         const float epsilon = 1e-6f;
         Vector2 a0Uv = GetLocalCrossingUv(triangle, a0);
@@ -502,6 +508,25 @@ internal static class EdgeCrossingTrimRouter
     }
 
     private static float Orient(Vector2 a, Vector2 b, Vector2 c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+
+    private static bool TryResolveTwoEvenPairingBySharedVertex(LocalCrossing a0, LocalCrossing a1, LocalCrossing b0, LocalCrossing b1, out bool direct)
+    {
+        direct = false;
+        int shared = -1;
+        if (a0.edgeStart == b0.edgeStart || a0.edgeStart == b0.edgeEnd) shared = a0.edgeStart;
+        else if (a0.edgeEnd == b0.edgeStart || a0.edgeEnd == b0.edgeEnd) shared = a0.edgeEnd;
+        if (shared < 0) return false;
+
+        bool a0Shared = a0.InsideVertex == shared;
+        bool a1Shared = a1.InsideVertex == shared;
+        bool b0Shared = b0.InsideVertex == shared;
+        bool b1Shared = b1.InsideVertex == shared;
+        if (a0Shared == a1Shared || b0Shared == b1Shared) return false;
+
+        direct = (a0Shared == b0Shared) && (a1Shared == b1Shared);
+        bool cross = (a0Shared == b1Shared) && (a1Shared == b0Shared);
+        return direct ^ cross;
+    }
 
     private static TriangleProcessResult.PolygonVertexRef[][] BuildInsidePolygonsForTwoOddOneEven(TriangleContext triangle, LocalCrossing a0, LocalCrossing a1, LocalCrossing s0, LocalCrossing s1, bool direct, bool middleInside)
     {
