@@ -370,29 +370,19 @@ internal static class EdgeCrossingTrimRouter
             return MakeWholeBySevenPointMajority(triangle);
         // Even-edge route: endpoints can be same-side by definition, so odd consistency check does not apply.
 
-        bool middleA = SampleMidSegmentInside(triangle, a0, a1);
-        bool middleB = SampleMidSegmentInside(triangle, b0, b1);
+        bool middleA = !a0.isBeforeInside && a1.isBeforeInside;
+        bool middleB = !b0.isBeforeInside && b1.isBeforeInside;
         if (middleA != middleB) return MakeWholeBySevenPointMajority(triangle);
+
+        bool direct = a0.InsideVertex == b0.InsideVertex && a1.InsideVertex == b1.InsideVertex;
+        bool cross = a0.InsideVertex == b1.InsideVertex && a1.InsideVertex == b0.InsideVertex;
+        if (direct == cross) return MakeWholeBySevenPointMajority(triangle);
 
         const float epsilon = 1e-6f;
         Vector2 a0Uv = GetLocalCrossingUv(triangle, a0);
         Vector2 a1Uv = GetLocalCrossingUv(triangle, a1);
         Vector2 b0Uv = GetLocalCrossingUv(triangle, b0);
         Vector2 b1Uv = GetLocalCrossingUv(triangle, b1);
-
-        bool directValid = !SegmentsProperlyIntersect(a0Uv, b0Uv, a1Uv, b1Uv, epsilon);
-        bool crossValid = !SegmentsProperlyIntersect(a0Uv, b1Uv, a1Uv, b0Uv, epsilon);
-        bool direct = false;
-        if (directValid && !crossValid) direct = true;
-        else if (!directValid && crossValid) direct = false;
-        else if (directValid && crossValid)
-        {
-            float directLen = (a0Uv - b0Uv).sqrMagnitude + (a1Uv - b1Uv).sqrMagnitude;
-            float crossLen = (a0Uv - b1Uv).sqrMagnitude + (a1Uv - b0Uv).sqrMagnitude;
-            direct = directLen <= crossLen;
-        }
-        else
-            return MakeWholeBySevenPointMajority(triangle);
 
         Vector2 chord1A = a0Uv;
         Vector2 chord1B = direct ? b0Uv : b1Uv;
@@ -509,12 +499,6 @@ internal static class EdgeCrossingTrimRouter
     }
 
     private static float Orient(Vector2 a, Vector2 b, Vector2 c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-    private static bool SampleMidSegmentInside(TriangleContext triangle, LocalCrossing c0, LocalCrossing c1)
-    {
-        Vector2 p0 = GetLocalCrossingUv(triangle, c0);
-        Vector2 p1 = GetLocalCrossingUv(triangle, c1);
-        return triangle.SampleInside((p0 + p1) * 0.5f);
-    }
 
     private static TriangleProcessResult.PolygonVertexRef[][] BuildInsidePolygonsForTwoOddOneEven(TriangleContext triangle, LocalCrossing a0, LocalCrossing a1, LocalCrossing s0, LocalCrossing s1, bool direct, bool middleInside)
     {
