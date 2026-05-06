@@ -15,6 +15,7 @@ public static class AutoFillColorResolver
         public int version;
         public FillColorRule[] fillColors;
         public PreSubdivideRule[] preSubdivide;
+        public string trimAlgorithm;
     }
 
     [Serializable]
@@ -64,6 +65,7 @@ public static class AutoFillColorResolver
         var materialMap = BuildMaterialMap(trimmer);
         var appliedTargets = new HashSet<NDMFVRoidMeshTrimmer.TextureTargetSettings>();
 
+        ApplyTrimAlgorithmRule(config, trimmer);
 
         ApplyPreSubdivideRules(config, targets);
 
@@ -111,6 +113,21 @@ public static class AutoFillColorResolver
         }
 
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Auto preSubdivide rules processed. RuleCount={config.preSubdivide.Length}, MatchedTargetCount={matched}");
+    }
+
+    private static void ApplyTrimAlgorithmRule(FillColorConfig config, NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (trimmer == null || string.IsNullOrWhiteSpace(config.trimAlgorithm)) return;
+        string mode = Normalize(config.trimAlgorithm);
+        if (mode == "legacyinsidepoint")
+        {
+            trimmer.trimAlgorithm = NDMFVRoidMeshTrimmer.TrimAlgorithm.LegacyInsidePoint;
+        }
+        else
+        {
+            trimmer.trimAlgorithm = NDMFVRoidMeshTrimmer.TrimAlgorithm.EdgeCrossing;
+        }
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Trim algorithm set by config: {trimmer.trimAlgorithm}");
     }
 
     private static bool TryMatchTarget(NDMFVRoidMeshTrimmer.TextureTargetSettings settings, string[] targetCandidates)
