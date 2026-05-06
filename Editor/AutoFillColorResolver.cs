@@ -15,6 +15,8 @@ public static class AutoFillColorResolver
         public int version;
         public FillColorRule[] fillColors;
         public PreSubdivideRule[] preSubdivide;
+        public string trimAlgorithm;
+        public string[] debugEdgeCrossingLogMaterials;
     }
 
     [Serializable]
@@ -64,6 +66,8 @@ public static class AutoFillColorResolver
         var materialMap = BuildMaterialMap(trimmer);
         var appliedTargets = new HashSet<NDMFVRoidMeshTrimmer.TextureTargetSettings>();
 
+        ApplyTrimAlgorithmRule(config, trimmer);
+        ApplyEdgeRouteDebugFilterRule(config, trimmer);
 
         ApplyPreSubdivideRules(config, targets);
 
@@ -111,6 +115,34 @@ public static class AutoFillColorResolver
         }
 
         Debug.Log($"[NDMF VRoid Mesh Trimmer] Auto preSubdivide rules processed. RuleCount={config.preSubdivide.Length}, MatchedTargetCount={matched}");
+    }
+
+    private static void ApplyTrimAlgorithmRule(FillColorConfig config, NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (trimmer == null || string.IsNullOrWhiteSpace(config.trimAlgorithm)) return;
+        string mode = Normalize(config.trimAlgorithm);
+        if (mode == "legacyinsidepoint")
+        {
+            trimmer.trimAlgorithm = NDMFVRoidMeshTrimmer.TrimAlgorithm.LegacyInsidePoint;
+        }
+        else
+        {
+            trimmer.trimAlgorithm = NDMFVRoidMeshTrimmer.TrimAlgorithm.EdgeCrossing;
+        }
+        Debug.Log($"[NDMF VRoid Mesh Trimmer] Trim algorithm set by config: {trimmer.trimAlgorithm}");
+    }
+
+    private static void ApplyEdgeRouteDebugFilterRule(FillColorConfig config, NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (trimmer == null) return;
+        trimmer.debugEdgeCrossingRouteMaterialFilters.Clear();
+        if (config.debugEdgeCrossingLogMaterials == null) return;
+        for (int i = 0; i < config.debugEdgeCrossingLogMaterials.Length; i++)
+        {
+            string v = config.debugEdgeCrossingLogMaterials[i];
+            if (string.IsNullOrWhiteSpace(v)) continue;
+            trimmer.debugEdgeCrossingRouteMaterialFilters.Add(v.Trim());
+        }
     }
 
     private static bool TryMatchTarget(NDMFVRoidMeshTrimmer.TextureTargetSettings settings, string[] targetCandidates)
