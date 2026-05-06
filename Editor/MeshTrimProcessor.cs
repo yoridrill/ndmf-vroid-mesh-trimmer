@@ -592,9 +592,8 @@ public static class MeshTrimProcessor
             stats.originalTriangles++;
             if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeKeep)
             {
-                int beforeOut = stats.outputTriangles;
-                AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
-                if (stats.outputTriangles > beforeOut) stats.routeWholeKeep++;
+                stats.routeWholeKeep++;
+                AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats, skipAreaThresholds: true);
             }
             else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeTrim)
             {
@@ -1705,7 +1704,8 @@ public static class MeshTrimProcessor
         List<Vector3> vertices,
         List<Vector2> uv,
         NDMFVRoidMeshTrimmer trimmer,
-        ref TrimStats stats)
+        ref TrimStats stats,
+        bool skipAreaThresholds = false)
     {
         if (a == b || b == c || c == a)
         {
@@ -1717,18 +1717,21 @@ public static class MeshTrimProcessor
         Vector2 uvb = uv[b];
         Vector2 uvc = uv[c];
 
-        float uvArea = Mathf.Abs((uvb.x - uva.x) * (uvc.y - uva.y) - (uvc.x - uva.x) * (uvb.y - uva.y)) * 0.5f;
-        if (uvArea < trimmer.minTriangleUvArea)
+        if (!skipAreaThresholds)
         {
-            stats.removedTriangles++;
-            return;
-        }
+            float uvArea = Mathf.Abs((uvb.x - uva.x) * (uvc.y - uva.y) - (uvc.x - uva.x) * (uvb.y - uva.y)) * 0.5f;
+            if (uvArea < trimmer.minTriangleUvArea)
+            {
+                stats.removedTriangles++;
+                return;
+            }
 
-        float worldArea = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).magnitude * 0.5f;
-        if (worldArea < trimmer.minTriangleWorldArea)
-        {
-            stats.removedTriangles++;
-            return;
+            float worldArea = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).magnitude * 0.5f;
+            if (worldArea < trimmer.minTriangleWorldArea)
+            {
+                stats.removedTriangles++;
+                return;
+            }
         }
 
         indices.Add(a);
