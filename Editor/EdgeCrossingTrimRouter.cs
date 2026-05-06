@@ -237,10 +237,21 @@ internal static class EdgeCrossingTrimRouter
         var edgeInfos = BuildEdgeInfos(triangle);
         int odd = 0;
         int even = 0;
+        int zero = 0;
+        int ge2 = 0;
         for (int i = 0; i < edgeInfos.Count; i++)
         {
             if (edgeInfos[i].parityClass == EdgeParityClass.OddEdge) odd++;
             else if (edgeInfos[i].parityClass == EdgeParityClass.EvenEdge) even++;
+            else zero++;
+            if (edgeInfos[i].crossings.Count >= 2) ge2++;
+        }
+
+        // Recovery path: if exactly one edge has zero crossings and the other two have at least two crossings,
+        // treat as two-line even-like case using min/max representatives.
+        if (zero == 1 && ge2 == 2)
+        {
+            return ProcessTwoEvenEdges(triangle, edgeInfos);
         }
 
         if (odd == 2 && even == 0) return ProcessTwoOddEdgesAsOneLine(triangle, edgeInfos);
