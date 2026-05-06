@@ -573,7 +573,7 @@ public static class MeshTrimProcessor
         List<int> dstIndices,
         string debugMaterialName)
     {
-        var shared = BuildSharedCrossings(srcIndices, maskData, uv);
+        var shared = BuildSharedCrossings(srcIndices, maskData, uv, trimmer);
         TrimStats stats = new TrimStats();
         var crossingVertexCache = new Dictionary<(int, int, float), int>();
         for (int i = 0; i < srcIndices.Length; i += 3)
@@ -721,9 +721,9 @@ public static class MeshTrimProcessor
         List<int> dstIndices,
         ref TrimStats stats)
     {
-        int cutA = GetOrCreateCrossingVertex(result.splitCrossingA, crossingVertexCache, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+        int cutA = GetOrCreateCrossingVertex(result.splitCrossingA, crossingVertexCache, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
             hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
-        int cutB = GetOrCreateCrossingVertex(result.splitCrossingB, crossingVertexCache, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+        int cutB = GetOrCreateCrossingVertex(result.splitCrossingB, crossingVertexCache, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
             hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
 
         if (result.keptInsideVertices == null || result.keptInsideVertices.Length == 0) return false;
@@ -747,6 +747,7 @@ public static class MeshTrimProcessor
     private static int GetOrCreateCrossingVertex(
         EdgeCrossingTrimRouter.LocalCrossing crossing,
         Dictionary<(int, int, float), int> cache,
+        NDMFVRoidMeshTrimmer trimmer,
         List<Vector3> vertices, List<Vector3> normals, List<Vector4> tangents, List<Vector2> uv, List<Vector2> uv2, List<Vector2> uv3, List<Vector2> uv4,
         List<Color> colors, List<BoneWeight> boneWeights,
         bool hasNormals, bool hasTangents, bool hasUv2, bool hasUv3, bool hasUv4, bool hasColors, bool hasBoneWeights,
@@ -756,7 +757,8 @@ public static class MeshTrimProcessor
         int a = Mathf.Min(crossing.edgeStart, crossing.edgeEnd);
         int b = Mathf.Max(crossing.edgeStart, crossing.edgeEnd);
         float t = crossing.edgeStart <= crossing.edgeEnd ? crossing.t : 1f - crossing.t;
-        var key = (a, b, Mathf.Round(t * 1000f) / 1000f);
+        float quantizeStep = trimmer != null ? Mathf.Max(0.00001f, trimmer.edgeCrossingCacheQuantizeStep) : 0.001f;
+        var key = (a, b, Mathf.Round(t / quantizeStep) * quantizeStep);
         if (cache.TryGetValue(key, out int idx)) return idx;
         int newIndex = AddInterpolatedVertex(crossing.edgeStart, crossing.edgeEnd, crossing.t, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
             hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
@@ -787,7 +789,7 @@ public static class MeshTrimProcessor
             {
                 var v = poly[k];
                 if (v.isOriginalVertex) indices.Add(v.originalVertexId);
-                else indices.Add(GetOrCreateCrossingVertex(v.crossing, crossingVertexCache, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                else indices.Add(GetOrCreateCrossingVertex(v.crossing, crossingVertexCache, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats));
             }
 
@@ -802,7 +804,7 @@ public static class MeshTrimProcessor
         return emitted;
     }
 
-    private static Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>> BuildSharedCrossings(int[] srcIndices, AlphaMaskProcessor.AlphaMaskData maskData, List<Vector2> uv)
+    private static Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>> BuildSharedCrossings(int[] srcIndices, AlphaMaskProcessor.AlphaMaskData maskData, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer)
     {
         var shared = new Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>>();
         var visited = new HashSet<EdgeCrossingTrimRouter.EdgeKey>();
@@ -811,11 +813,11 @@ public static class MeshTrimProcessor
             int i0 = srcIndices[i];
             int i1 = srcIndices[i + 1];
             int i2 = srcIndices[i + 2];
-            RegisterEdgeCrossing(maskData, uv, i0, i1, shared, visited);
-            RegisterEdgeCrossing(maskData, uv, i1, i2, shared, visited);
-            RegisterEdgeCrossing(maskData, uv, i2, i0, shared, visited);
+            RegisterEdgeCrossing(maskData, uv, i0, i1, shared, visited, trimmer);
+            RegisterEdgeCrossing(maskData, uv, i1, i2, shared, visited, trimmer);
+            RegisterEdgeCrossing(maskData, uv, i2, i0, shared, visited, trimmer);
         }
-        const float mergeEpsilon = 1e-3f;
+        float mergeEpsilon = trimmer != null ? Mathf.Max(0.00001f, trimmer.edgeCrossingMergeEpsilon) : 0.001f;
         foreach (var kv in shared)
         {
             kv.Value.Sort((x, y) => x.t.CompareTo(y.t));
@@ -836,7 +838,8 @@ public static class MeshTrimProcessor
         int a,
         int b,
         Dictionary<EdgeCrossingTrimRouter.EdgeKey, List<EdgeCrossingTrimRouter.EdgeCrossing>> shared,
-        HashSet<EdgeCrossingTrimRouter.EdgeKey> visited)
+        HashSet<EdgeCrossingTrimRouter.EdgeKey> visited,
+        NDMFVRoidMeshTrimmer trimmer)
     {
         var key = new EdgeCrossingTrimRouter.EdgeKey(a, b);
         if (!visited.Add(key)) return;
@@ -849,7 +852,7 @@ public static class MeshTrimProcessor
         Vector2 ua = uv[a];
         Vector2 ub = uv[b];
         const int samples = 32;
-        const float endpointSnapEpsilon = 1e-3f;
+        float endpointSnapEpsilon = trimmer != null ? Mathf.Max(0.00001f, trimmer.edgeCrossingEndpointSnapEpsilon) : 0.001f;
         bool prevInside = AlphaMaskProcessor.SampleMask(maskData, ua);
         float prevT = 0f;
 

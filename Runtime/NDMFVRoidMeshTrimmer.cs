@@ -66,6 +66,9 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour, IEditorOnly
 
     [Min(0f)] public float minTriangleUvArea = 0.0000001f;
     [Min(0f)] public float minTriangleWorldArea = 0.0000001f;
+    [Range(0.00001f, 0.01f)] public float edgeCrossingMergeEpsilon = 0.001f;
+    [Range(0.00001f, 0.01f)] public float edgeCrossingEndpointSnapEpsilon = 0.001f;
+    [Range(0.00001f, 0.01f)] public float edgeCrossingCacheQuantizeStep = 0.001f;
 
     [SerializeField] private bool previewActiveSerialized;
     [SerializeField] private List<PreviewRecoveryRecord> previewRecoveryRecords = new List<PreviewRecoveryRecord>();
