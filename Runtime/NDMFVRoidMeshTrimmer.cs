@@ -6,6 +6,11 @@ using VRC.SDKBase;
 [AddComponentMenu("yoridrill/NDMF VRoid Mesh Trimmer")]
 public class NDMFVRoidMeshTrimmer : MonoBehaviour, IEditorOnly
 {
+    public enum TrimAlgorithm
+    {
+        EdgeCrossing = 0,
+        LegacyInsidePoint = 1
+    }
     public enum TexturePostProcessMode
     {
         None = 0,
@@ -64,6 +69,8 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour, IEditorOnly
 
     [SerializeField] private bool previewActiveSerialized;
     [SerializeField] private List<PreviewRecoveryRecord> previewRecoveryRecords = new List<PreviewRecoveryRecord>();
+    [HideInInspector] public TrimAlgorithm trimAlgorithm = TrimAlgorithm.EdgeCrossing;
+    [HideInInspector] public bool debugEdgeCrossingRoutes = false;
 
     public bool PreviewActiveSerialized
     {
