@@ -811,7 +811,7 @@ public static class MeshTrimProcessor
 
             bool canonical = key.a == a && key.b == b;
             float tCanonical = canonical ? hi : 1f - hi;
-            bool beforeInsideCanonical = canonical ? loInside : curInside;
+            bool beforeInsideCanonical = canonical ? loInside : !loInside;
             list.Add(new EdgeCrossingTrimRouter.EdgeCrossing { edge = key, t = tCanonical, isBeforeInside = beforeInsideCanonical });
 
             prevInside = curInside;
