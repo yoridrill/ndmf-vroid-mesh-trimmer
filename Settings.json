@@ -2,9 +2,6 @@
   "version": 1,
   "trimAlgorithm": "edgeCrossing",
   "debugEdgeCrossingLogMaterials": ["Iris"],
-  "edgeCrossingMergeEpsilon": 0.001,
-  "edgeCrossingEndpointSnapEpsilon": 0.001,
-  "edgeCrossingCacheQuantizeStep": 0.001,
   "fillColors": [
     {
       "target": ["eyeline", "アイライン"],
