@@ -254,7 +254,8 @@ public static class MeshTrimProcessor
                 hasColors,
                 hasBoneWeights,
                 vertexSources,
-                newSubMeshIndices[sub]);
+                newSubMeshIndices[sub],
+                src.sharedMaterials != null && sub < src.sharedMaterials.Length && src.sharedMaterials[sub] != null ? src.sharedMaterials[sub].name : string.Empty);
 
             stats.addedVertices = vertices.Count - baseVertexCount;
             baseVertexCount = vertices.Count;
@@ -531,7 +532,8 @@ public static class MeshTrimProcessor
         bool hasColors,
         bool hasBoneWeights,
         List<VertexSource> vertexSources,
-        List<int> dstIndices)
+        List<int> dstIndices,
+        string debugMaterialName)
     {
         if (trimmer != null && trimmer.trimAlgorithm == NDMFVRoidMeshTrimmer.TrimAlgorithm.LegacyInsidePoint)
         {
@@ -540,7 +542,7 @@ public static class MeshTrimProcessor
         }
 
         return ProcessSubMeshEdgeCrossing(srcIndices, maskData, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, dstIndices);
+            hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, dstIndices, debugMaterialName);
     }
 
     // NOTE: Edge-crossing route currently reuses the stable legacy geometry path for final mesh emission.
@@ -567,7 +569,8 @@ public static class MeshTrimProcessor
         bool hasColors,
         bool hasBoneWeights,
         List<VertexSource> vertexSources,
-        List<int> dstIndices)
+        List<int> dstIndices,
+        string debugMaterialName)
     {
         var shared = BuildSharedCrossings(srcIndices, maskData, uv);
         TrimStats stats = new TrimStats();
@@ -629,13 +632,29 @@ public static class MeshTrimProcessor
                     EmitSevenPointMajorityTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
                 }
             }
-            if (trimmer != null && trimmer.debugEdgeCrossingRoutes)
+            if (trimmer != null && trimmer.debugEdgeCrossingRoutes && ShouldEmitEdgeRouteDebugForMaterial(trimmer, debugMaterialName))
             {
                 LogEdgeRouteTriangleDebug(i / 3, ctx, shared, result, fallbackReason);
             }
         }
 
         return stats;
+    }
+
+    private static bool ShouldEmitEdgeRouteDebugForMaterial(NDMFVRoidMeshTrimmer trimmer, string materialName)
+    {
+        if (trimmer == null) return false;
+        var filters = trimmer.debugEdgeCrossingRouteMaterialFilters;
+        if (filters == null || filters.Count == 0) return true;
+        if (string.IsNullOrEmpty(materialName)) return false;
+        string name = materialName.ToLowerInvariant();
+        for (int i = 0; i < filters.Count; i++)
+        {
+            string f = filters[i];
+            if (string.IsNullOrWhiteSpace(f)) continue;
+            if (name.Contains(f.ToLowerInvariant())) return true;
+        }
+        return false;
     }
 
     private static void LogEdgeRouteTriangleDebug(
