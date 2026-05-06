@@ -700,13 +700,41 @@ internal static class EdgeCrossingTrimRouter
             return MakeWholeBySevenPointMajority(triangle);
         }
 
-        int aInside = GetInsideEndpointForCrossing(a);
-        int bInside = GetInsideEndpointForCrossing(b);
-        int[] keptInsideVertices = aInside == bInside
-            ? new[] { aInside }
-            : new[] { aInside, bInside };
+        var active = new List<LocalCrossing> { a, b };
+        var activeNodes = BuildActiveNodeMap(active);
+        if (!TryBuildInsideBoundarySegments(triangle, edgeInfos, active, activeNodes, out var boundarySegments, out _))
+            return MakeWholeBySevenPointMajority(triangle);
+        if (!TryExtractInsideLoopsSingleChord(triangle, boundarySegments, activeNodes, new Chord(a, b), out var loops, out _))
+            return MakeWholeBySevenPointMajority(triangle);
+        var polygons = ConvertLoopsToPolygonRefs(loops);
+        if (!ValidateInsidePolygons(triangle, polygons, epsilon)) return MakeWholeBySevenPointMajority(triangle);
+        return new TriangleProcessResult(TriangleRoute.TwoOddEdgesAsOneLine, a, b, default, default, true, false, polygons);
+    }
 
-        return new TriangleProcessResult(a, b, keptInsideVertices);
+    internal static bool TryExtractInsideLoopsSingleChord(
+        TriangleContext triangle,
+        IReadOnlyList<LoopSegment> boundarySegments,
+        IReadOnlyDictionary<int, LoopNode> activeNodes,
+        Chord chord,
+        out LoopNode[][] loops,
+        out string failReason)
+    {
+        loops = Array.Empty<LoopNode[]>();
+        failReason = "none";
+        const float epsilon = 1e-6f;
+        const float minArea = 1e-10f;
+        var graph = new LoopGraph();
+        if (boundarySegments != null) for (int i = 0; i < boundarySegments.Count; i++) AddSegmentIfValid(triangle, graph, boundarySegments[i].a, boundarySegments[i].b, epsilon);
+        if (!TryGetActiveNode(activeNodes, chord.a, out var ca) || !TryGetActiveNode(activeNodes, chord.b, out var cb) || !AddSegmentIfValid(triangle, graph, ca, cb, epsilon))
+        { failReason = "invalid_chord"; return false; }
+        var adj = BuildAdjacency(graph);
+        foreach (var kv in adj) if (kv.Value.Count != 2) { failReason = "open_path_or_degree_invalid"; return false; }
+        if (adj.Count == 0) { failReason = "empty_graph"; return false; }
+        var start = new List<LoopNode>(adj.Keys)[0];
+        if (!TraceCycle(adj, start, out var loop, out failReason)) return false;
+        if (!ValidateExtractedLoop(triangle, loop, epsilon, minArea, out failReason)) return false;
+        loops = new[] { loop.ToArray() };
+        return true;
     }
 
     internal static TriangleProcessResult ProcessTwoOddEdgesAndOneEvenEdge(TriangleContext triangle, List<EdgeInfo> edgeInfos)

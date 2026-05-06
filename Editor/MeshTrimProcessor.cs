@@ -606,26 +606,19 @@ public static class MeshTrimProcessor
             }
             else
             {
-                if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine && result.hasOneLineSplit)
+                if ((result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine
+                    || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge
+                    || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges)
+                    && result.insidePolygons != null && result.insidePolygons.Length > 0)
                 {
-                    stats.routeOneLine++;
-                    if (!TryEmitOneLineSplit(result, i0, i1, i2, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                        hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, crossingVertexCache, dstIndices, ref stats, out string oneLineFailReason))
-                    {
-                        stats.routeMajorityFallback++;
-                        majorityFallbackReason = $"emit_one_line_failed:{oneLineFailReason}";
-                        EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
-                    }
-                }
-                else if ((result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges) && result.hasTwoLineSplit)
-                {
-                    if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge) stats.routeTwoLineOddOddEven++;
+                    if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine) stats.routeOneLine++;
+                    else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge) stats.routeTwoLineOddOddEven++;
                     else stats.routeTwoLineEvenEven++;
                     if (!TryEmitInsidePolygons(result, i0, i1, i2, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                         hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, crossingVertexCache, dstIndices, ref stats, out string polyFailReason))
                     {
                         stats.routeMajorityFallback++;
-                        majorityFallbackReason = $"emit_two_line_failed:{polyFailReason}";
+                        majorityFallbackReason = $"emit_inside_polygons_failed:{polyFailReason}";
                         EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
                     }
                 }
