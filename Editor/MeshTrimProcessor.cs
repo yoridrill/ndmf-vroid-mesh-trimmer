@@ -949,6 +949,19 @@ public static class MeshTrimProcessor
                 else indices.Add(GetOrCreateCrossingVertex(v.crossing, crossingVertexCache, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats));
             }
+            var before = new List<Vector2>(indices.Count);
+            for (int i = 0; i < indices.Count; i++) before.Add(uv[indices[i]]);
+            SimplifyPolygonIndices(indices, uv, out int removedAdjacent, out int removedCollinear);
+            var after = new List<Vector2>(indices.Count);
+            for (int i = 0; i < indices.Count; i++) after.Add(uv[indices[i]]);
+            if (trimmer != null && trimmer.debugEdgeCrossingRoutes)
+            {
+                float srcAreaDbg = Mathf.Abs((uv[i1].x - uv[i0].x) * (uv[i2].y - uv[i0].y) - (uv[i2].x - uv[i0].x) * (uv[i1].y - uv[i0].y)) * 0.5f;
+                float polyAreaDbg = Mathf.Abs(ComputePolygonSignedArea(indices, uv));
+                float ratioDbg = srcAreaDbg > 0f ? polyAreaDbg / srcAreaDbg : 0f;
+                Debug.Log($"[NDMF VRoid Mesh Trimmer][PolySimplify] route={result.route} poly={p} beforeCount={before.Count} before=[{string.Join(";", before)}] afterCount={after.Count} after=[{string.Join(";", after)}] removedAdjacent={removedAdjacent} removedCollinear={removedCollinear} areaRatioAfter={ratioDbg}");
+            }
+            if (indices.Count < 3) { failReason = "polygon_too_small_after_simplify"; failDetail = $"poly={p}"; return false; }
             if (!ValidateInsideLoop(indices, i0, i1, i2, uv, trimmer, out failDetail))
             {
                 failReason = "loop_validation_failed";
@@ -973,6 +986,53 @@ public static class MeshTrimProcessor
         if (staged.Count == 0) { failReason = "no_staged_triangles"; return false; }
         CommitStagedTriangles(staged, dstIndices, ref stats);
         return true;
+    }
+
+    private static void SimplifyPolygonIndices(List<int> indices, List<Vector2> uv, out int removedAdjacent, out int removedCollinear)
+    {
+        removedAdjacent = 0;
+        removedCollinear = 0;
+        const float eps = 1e-6f;
+        if (indices == null) return;
+
+        bool changed = true;
+        while (changed && indices.Count >= 3)
+        {
+            changed = false;
+            for (int i = 0; i < indices.Count; i++)
+            {
+                int j = (i + 1) % indices.Count;
+                if ((uv[indices[i]] - uv[indices[j]]).sqrMagnitude <= eps * eps)
+                {
+                    indices.RemoveAt(j);
+                    removedAdjacent++;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        changed = true;
+        while (changed && indices.Count >= 3)
+        {
+            changed = false;
+            for (int i = 0; i < indices.Count; i++)
+            {
+                int prev = (i - 1 + indices.Count) % indices.Count;
+                int next = (i + 1) % indices.Count;
+                Vector2 a = uv[indices[prev]];
+                Vector2 b = uv[indices[i]];
+                Vector2 c = uv[indices[next]];
+                float area2 = Mathf.Abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y));
+                if (area2 <= eps)
+                {
+                    indices.RemoveAt(i);
+                    removedCollinear++;
+                    changed = true;
+                    break;
+                }
+            }
+        }
     }
 
     private static bool ValidateInsideLoop(List<int> indices, int i0, int i1, int i2, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, out string failDetail)
