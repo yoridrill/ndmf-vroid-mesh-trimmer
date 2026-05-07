@@ -774,7 +774,7 @@ public static class MeshTrimProcessor
             }
             float area = Mathf.Abs(ComputePolygonSignedAreaUvs(uvs));
             float ratio = srcArea > 0f ? area / srcArea : 0f;
-            Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} polygonAttempt p={p} c0=edge{c0.edgeIndex}({c0.edgeStart}-{c0.edgeEnd}) t={c0.t:F6} before={(c0.isBeforeInside?1:0)} uv={c0Uv} c1=edge{c1.edgeIndex}({c1.edgeStart}-{c1.edgeEnd}) t={c1.t:F6} before={(c1.isBeforeInside?1:0)} uv={c1Uv} polyUvs=[{string.Join(\";\", uvs)}] polyArea={area} srcArea={srcArea} areaRatio={ratio} failReason={failReason} failDetail={failDetail}");
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} polygonAttempt p={p} c0=edge{c0.edgeIndex}({c0.edgeStart}-{c0.edgeEnd}) t={c0.t:F6} before={(c0.isBeforeInside?1:0)} uv={c0Uv} c1=edge{c1.edgeIndex}({c1.edgeStart}-{c1.edgeEnd}) t={c1.t:F6} before={(c1.isBeforeInside?1:0)} uv={c1Uv} polyUvs=[{string.Join(";", uvs)}] polyArea={area} srcArea={srcArea} areaRatio={ratio} failReason={failReason} failDetail={failDetail}");
         }
     }
 
@@ -803,7 +803,7 @@ public static class MeshTrimProcessor
         bool s12 = AlphaMaskProcessor.SampleMask(maskData, m12);
         bool s20 = AlphaMaskProcessor.SampleMask(maskData, m20);
         bool sc = AlphaMaskProcessor.SampleMask(maskData, c);
-        Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} majority7 v0={(v0?1:0)} v1={(v1?1:0)} v2={(v2?1:0)} m01={(s01?1:0)} m12={(s12?1:0)} m20={(s20?1:0)} centroid={(sc?1:0)} insideCount={insideCount} result={(insideCount>=4?\"WholeKeep\":\"WholeTrim\")}");
+        Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} majority7 v0={(v0?1:0)} v1={(v1?1:0)} v2={(v2?1:0)} m01={(s01?1:0)} m12={(s12?1:0)} m20={(s20?1:0)} centroid={(sc?1:0)} insideCount={insideCount} result={(insideCount>=4?"WholeKeep":"WholeTrim")}");
     }
 
     private static void EmitMajority7PointTriangle(
