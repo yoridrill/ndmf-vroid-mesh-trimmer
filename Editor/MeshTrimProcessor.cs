@@ -957,6 +957,8 @@ public static class MeshTrimProcessor
         failDetail = "none";
         if (result.insidePolygons == null || result.insidePolygons.Length == 0) { failReason = "empty_inside_polygons"; return false; }
         var staged = new List<(int a, int b, int c)>();
+        float srcAreaForFan = Mathf.Abs((uv[i1].x - uv[i0].x) * (uv[i2].y - uv[i0].y) - (uv[i2].x - uv[i0].x) * (uv[i1].y - uv[i0].y)) * 0.5f;
+        const float fanTriangleMinAreaRatio = 0.0002f;
         for (int p = 0; p < result.insidePolygons.Length; p++)
         {
             var poly = result.insidePolygons[p];
@@ -1001,7 +1003,9 @@ public static class MeshTrimProcessor
                 int c = indices[k + 1];
                 float fanUvArea = Mathf.Abs((uv[b].x - uv[a].x) * (uv[c].y - uv[a].y) - (uv[c].x - uv[a].x) * (uv[b].y - uv[a].y)) * 0.5f;
                 GetTrianglePreserveWinding(i0, i1, i2, ref a, ref b, ref c, vertices);
-                if (!IsTriangleValidForEmit(a, b, c, vertices, uv, trimmer)) { failDetail = $"{failDetail} fanTriangleIndex={k} fanUvArea={fanUvArea:F8} finalPolygon=[{FormatUvList6(after)}] fanTriangleUv=[{FormatUvList6(new List<Vector2>{uv[indices[0]],uv[indices[k]],uv[indices[k+1]]})}] adjacentDistance=[{FormatAdjacentDistances(after)}] duplicateEpsilon={Mathf.Sqrt(LoopDuplicateUvEpsilonSqr):F8}"; failReason = "fan_triangle_invalid"; return false; }
+                float fanAreaRatio = srcAreaForFan > 0f ? fanUvArea / srcAreaForFan : 0f;
+                float fanMinArea = srcAreaForFan * fanTriangleMinAreaRatio;
+                if (!IsFanTriangleValidForEmit(a, b, c, vertices, uv, fanUvArea, fanMinArea)) { failDetail = $"{failDetail} polygonAreaRatio={(srcAreaForFan>0f?Mathf.Abs(ComputePolygonSignedArea(indices, uv))/srcAreaForFan:0f):F8} fanTriangleIndex={k} fanUvArea={fanUvArea:F8} fanTriangleAreaRatio={fanAreaRatio:F8} fanTriangleMinAreaRatio={fanTriangleMinAreaRatio:F8} fanTriangleMinAreaThreshold={fanMinArea:F8} finalPolygon=[{FormatUvList6(after)}] fanTriangleUv=[{FormatUvList6(new List<Vector2>{uv[indices[0]],uv[indices[k]],uv[indices[k+1]]})}] adjacentDistance=[{FormatAdjacentDistances(after)}] duplicateEpsilon={Mathf.Sqrt(LoopDuplicateUvEpsilonSqr):F8}"; failReason = "fan_triangle_invalid"; return false; }
                 staged.Add((a, b, c));
             }
         }
@@ -1152,6 +1156,15 @@ public static class MeshTrimProcessor
         if (uvArea < trimmer.minTriangleUvArea) return false;
         float worldArea = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).magnitude * 0.5f;
         if (worldArea < trimmer.minTriangleWorldArea) return false;
+        return true;
+    }
+
+    private static bool IsFanTriangleValidForEmit(int a, int b, int c, List<Vector3> vertices, List<Vector2> uv, float fanUvArea, float fanMinArea)
+    {
+        if (a == b || b == c || c == a) return false;
+        if (fanUvArea <= fanMinArea) return false;
+        float worldArea = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).magnitude * 0.5f;
+        if (worldArea <= 1e-12f) return false;
         return true;
     }
 
