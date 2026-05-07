@@ -593,7 +593,7 @@ public static class MeshTrimProcessor
             };
             var result = EdgeCrossingTrimRouter.ProcessTriangle(ctx);
             string majorityFallbackReason = "none";
-            bool oneLineDebugEnabled = trimmer != null && trimmer.debugEdgeCrossingRoutes && ShouldEmitEdgeRouteDebugForMaterial(trimmer, debugMaterialName);
+            bool oneLineDebugEnabled = IsOneLineDebugEnabled(trimmer, debugMaterialName);
             stats.originalTriangles++;
             if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeKeep)
             {
@@ -675,6 +675,13 @@ public static class MeshTrimProcessor
             if (name.Contains(f.ToLowerInvariant())) return true;
         }
         return false;
+    }
+
+    private static bool IsOneLineDebugEnabled(NDMFVRoidMeshTrimmer trimmer, string materialName)
+    {
+        return trimmer != null
+            && trimmer.debugEdgeCrossingRoutes
+            && ShouldEmitEdgeRouteDebugForMaterial(trimmer, materialName);
     }
 
     private static void LogEdgeRouteTriangleDebug(
