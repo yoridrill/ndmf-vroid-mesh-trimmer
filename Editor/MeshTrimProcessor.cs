@@ -790,6 +790,26 @@ public static class MeshTrimProcessor
         return a * 0.5f;
     }
 
+    private static string FormatUvList6(List<Vector2> uvs)
+    {
+        if (uvs == null) return "";
+        var items = new List<string>(uvs.Count);
+        for (int i = 0; i < uvs.Count; i++) items.Add($"({uvs[i].x:F6},{uvs[i].y:F6})");
+        return string.Join(";", items);
+    }
+
+    private static string FormatAdjacentDistances(List<Vector2> uvs)
+    {
+        if (uvs == null || uvs.Count == 0) return "";
+        var items = new List<string>(uvs.Count);
+        for (int i = 0; i < uvs.Count; i++)
+        {
+            int j = (i + 1) % uvs.Count;
+            items.Add($"{i}-{j}:{Vector2.Distance(uvs[i], uvs[j]):F8}");
+        }
+        return string.Join(",", items);
+    }
+
     private static void LogOneLineMajorityBreakdown(int triId, AlphaMaskProcessor.AlphaMaskData maskData, EdgeCrossingTrimRouter.TriangleContext ctx, int insideCount)
     {
         bool v0 = AlphaMaskProcessor.SampleMask(maskData, ctx.uv0);
@@ -959,7 +979,7 @@ public static class MeshTrimProcessor
                 float srcAreaDbg = Mathf.Abs((uv[i1].x - uv[i0].x) * (uv[i2].y - uv[i0].y) - (uv[i2].x - uv[i0].x) * (uv[i1].y - uv[i0].y)) * 0.5f;
                 float polyAreaDbg = Mathf.Abs(ComputePolygonSignedArea(indices, uv));
                 float ratioDbg = srcAreaDbg > 0f ? polyAreaDbg / srcAreaDbg : 0f;
-                Debug.Log($"[NDMF VRoid Mesh Trimmer][PolySimplify] route={result.route} poly={p} beforeCount={before.Count} before=[{string.Join(";", before)}] afterCount={after.Count} after=[{string.Join(";", after)}] removedAdjacent={removedAdjacent} removedCollinear={removedCollinear} areaRatioAfter={ratioDbg}");
+                Debug.Log($"[NDMF VRoid Mesh Trimmer][PolySimplify] route={result.route} poly={p} emitBeforeSimplify=[{FormatUvList6(before)}] emitAfterSimplify=[{FormatUvList6(after)}] emitRemovedAdjacentDuplicateCount={removedAdjacent} emitRemovedCollinearCount={removedCollinear} areaRatioAfter={ratioDbg:F8} adjacentDistance=[{FormatAdjacentDistances(after)}] duplicateEpsilon={Mathf.Sqrt(LoopDuplicateUvEpsilonSqr):F8}");
             }
             if (indices.Count < 3) { failReason = "polygon_too_small_after_simplify"; failDetail = $"poly={p} polyBeforeSimplify=[{string.Join(";", before)}] polyAfterSimplify=[{string.Join(";", after)}] removedAdjacentDuplicateCount={removedAdjacent} removedCollinearCount={removedCollinear}"; return false; }
             if (!ValidateInsideLoop(indices, i0, i1, i2, uv, trimmer, out failDetail))
@@ -979,8 +999,9 @@ public static class MeshTrimProcessor
                 int a = indices[0];
                 int b = indices[k];
                 int c = indices[k + 1];
+                float fanUvArea = Mathf.Abs((uv[b].x - uv[a].x) * (uv[c].y - uv[a].y) - (uv[c].x - uv[a].x) * (uv[b].y - uv[a].y)) * 0.5f;
                 GetTrianglePreserveWinding(i0, i1, i2, ref a, ref b, ref c, vertices);
-                if (!IsTriangleValidForEmit(a, b, c, vertices, uv, trimmer)) { failReason = "fan_triangle_invalid"; return false; }
+                if (!IsTriangleValidForEmit(a, b, c, vertices, uv, trimmer)) { failDetail = $"{failDetail} fanTriangleIndex={k} fanUvArea={fanUvArea:F8} finalPolygon=[{FormatUvList6(after)}] fanTriangleUv=[{FormatUvList6(new List<Vector2>{uv[indices[0]],uv[indices[k]],uv[indices[k+1]]})}] adjacentDistance=[{FormatAdjacentDistances(after)}] duplicateEpsilon={Mathf.Sqrt(LoopDuplicateUvEpsilonSqr):F8}"; failReason = "fan_triangle_invalid"; return false; }
                 staged.Add((a, b, c));
             }
         }
