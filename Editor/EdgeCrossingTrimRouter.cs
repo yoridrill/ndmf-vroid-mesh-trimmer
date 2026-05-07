@@ -511,7 +511,14 @@ internal static class EdgeCrossingTrimRouter
 
     private static bool ValidateExtractedLoop(TriangleContext triangle, List<LoopNode> loop, float epsilon, float minArea, out string failReason)
     {
+        return ValidateExtractedLoop(triangle, loop, epsilon, minArea, out failReason, out _, out _);
+    }
+
+    private static bool ValidateExtractedLoop(TriangleContext triangle, List<LoopNode> loop, float epsilon, float minArea, out string failReason, out float loopUvArea, out List<float> fanUvAreas)
+    {
         failReason = "none";
+        loopUvArea = 0f;
+        fanUvAreas = new List<float>();
         if (loop == null || loop.Count < 3) { failReason = "loop_vertex_count_lt3"; return false; }
         for (int i = 0; i < loop.Count; i++)
         {
@@ -525,6 +532,7 @@ internal static class EdgeCrossingTrimRouter
         var poly = new List<Vector2>(loop.Count);
         for (int i = 0; i < loop.Count; i++) poly.Add(GetNodeUv(triangle, loop[i]));
         float area = Mathf.Abs(SignedArea(poly));
+        loopUvArea = area;
         if (area <= minArea) { failReason = "area_too_small"; return false; }
         if (PolygonHasSelfIntersection(poly, epsilon)) { failReason = "self_intersection"; return false; }
         for (int i = 1; i + 1 < loop.Count; i++)
@@ -533,10 +541,34 @@ internal static class EdgeCrossingTrimRouter
             Vector2 b = poly[i];
             Vector2 c = poly[i + 1];
             float triArea = Mathf.Abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y)) * 0.5f;
+            fanUvAreas.Add(triArea);
             if (triArea <= minArea) { failReason = "fan_triangle_invalid"; return false; }
         }
         return true;
     }
+
+    private static string BuildOneLineDebugDump(TriangleContext triangle, IReadOnlyList<LoopSegment> boundarySegments, Dictionary<LoopNode, List<LoopNode>> adj, List<LoopNode> loop, float loopUvArea, List<float> fanUvAreas, float minArea)
+    {
+        var seg = new List<string>();
+        if (boundarySegments != null) for (int i = 0; i < boundarySegments.Count; i++) seg.Add($"{FormatNode(boundarySegments[i].a)}->{FormatNode(boundarySegments[i].b)}");
+        var deg = new List<string>();
+        foreach (var kv in adj) deg.Add($"{FormatNode(kv.Key)}:deg={kv.Value.Count}");
+        var nodes = new List<string>();
+        if (loop != null)
+        {
+            for (int i = 0; i < loop.Count; i++)
+            {
+                var n = loop[i];
+                Vector2 uv = GetNodeUv(triangle, n);
+                nodes.Add($"{FormatNode(n)} edgeIndex={n.crossing.edgeIndex} t={n.crossing.t:F6} before={(n.crossing.isBeforeInside ? 1 : 0)} uv={uv}");
+            }
+        }
+        string fan = fanUvAreas == null ? "" : string.Join(",", fanUvAreas);
+        return $"boundarySegments=[{string.Join(",", seg)}] graphDegrees=[{string.Join(",", deg)}] loopNodeCount={(loop == null ? 0 : loop.Count)} loopNodes=[{string.Join(";", nodes)}] loopUvArea={loopUvArea} fanUvAreas=[{fan}] minAreaThreshold={minArea}";
+    }
+
+    private static string FormatNode(LoopNode n)
+        => n.isOriginalVertex ? $"v{n.originalVertexId}" : $"x{n.activeCrossingIndex}";
 
     private static bool TryGetActiveNode(IReadOnlyDictionary<int, LoopNode> activeNodes, LocalCrossing crossing, out LoopNode node)
     {
@@ -704,10 +736,17 @@ internal static class EdgeCrossingTrimRouter
         var activeNodes = BuildActiveNodeMap(active);
         if (!TryBuildInsideBoundarySegments(triangle, edgeInfos, active, activeNodes, out var boundarySegments, out _))
             return MakeWholeBySevenPointMajority(triangle);
-        if (!TryExtractInsideLoopsSingleChord(triangle, boundarySegments, activeNodes, new Chord(a, b), out var loops, out _))
+        if (!TryExtractInsideLoopsSingleChord(triangle, boundarySegments, activeNodes, new Chord(a, b), out var loops, out var extractFailReason, out var extractDebug))
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineLoopDebug] stage=extract failReason={extractFailReason} {extractDebug}");
             return MakeWholeBySevenPointMajority(triangle);
+        }
         var polygons = ConvertLoopsToPolygonRefs(loops);
-        if (!ValidateInsidePolygons(triangle, polygons, epsilon)) return MakeWholeBySevenPointMajority(triangle);
+        if (!ValidateInsidePolygons(triangle, polygons, epsilon, out var polyFailReason, out var areas))
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineLoopDebug] stage=validate_inside_polygons failReason={polyFailReason} areas=[{string.Join(",", areas)}] minAreaThreshold=1e-10");
+            return MakeWholeBySevenPointMajority(triangle);
+        }
         return new TriangleProcessResult(TriangleRoute.TwoOddEdgesAsOneLine, a, b, default, default, true, false, polygons);
     }
 
@@ -717,23 +756,27 @@ internal static class EdgeCrossingTrimRouter
         IReadOnlyDictionary<int, LoopNode> activeNodes,
         Chord chord,
         out LoopNode[][] loops,
-        out string failReason)
+        out string failReason,
+        out string debugInfo)
     {
         loops = Array.Empty<LoopNode[]>();
         failReason = "none";
+        debugInfo = string.Empty;
         const float epsilon = 1e-6f;
         const float minArea = 1e-10f;
         var graph = new LoopGraph();
         if (boundarySegments != null) for (int i = 0; i < boundarySegments.Count; i++) AddSegmentIfValid(triangle, graph, boundarySegments[i].a, boundarySegments[i].b, epsilon);
         if (!TryGetActiveNode(activeNodes, chord.a, out var ca) || !TryGetActiveNode(activeNodes, chord.b, out var cb) || !AddSegmentIfValid(triangle, graph, ca, cb, epsilon))
-        { failReason = "invalid_chord"; return false; }
+        { failReason = "invalid_chord"; debugInfo = $"chord={FormatCrossing(chord.a)}->{FormatCrossing(chord.b)}"; return false; }
         var adj = BuildAdjacency(graph);
-        foreach (var kv in adj) if (kv.Value.Count != 2) { failReason = "open_path_or_degree_invalid"; return false; }
-        if (adj.Count == 0) { failReason = "empty_graph"; return false; }
+        foreach (var kv in adj) if (kv.Value.Count != 2) { failReason = "open_path_or_degree_invalid"; debugInfo = BuildOneLineDebugDump(triangle, boundarySegments, adj, null, 0f, null, minArea); return false; }
+        if (adj.Count == 0) { failReason = "empty_graph"; debugInfo = BuildOneLineDebugDump(triangle, boundarySegments, adj, null, 0f, null, minArea); return false; }
         var start = new List<LoopNode>(adj.Keys)[0];
-        if (!TraceCycle(adj, start, out var loop, out failReason)) return false;
-        if (!ValidateExtractedLoop(triangle, loop, epsilon, minArea, out failReason)) return false;
+        if (!TraceCycle(adj, start, out var loop, out failReason)) { debugInfo = BuildOneLineDebugDump(triangle, boundarySegments, adj, loop, 0f, null, minArea); return false; }
+        if (!ValidateExtractedLoop(triangle, loop, epsilon, minArea, out failReason, out var loopUvArea, out var fanAreas))
+        { debugInfo = BuildOneLineDebugDump(triangle, boundarySegments, adj, loop, loopUvArea, fanAreas, minArea); return false; }
         loops = new[] { loop.ToArray() };
+        debugInfo = BuildOneLineDebugDump(triangle, boundarySegments, adj, loop, loopUvArea, fanAreas, minArea);
         return true;
     }
 
