@@ -627,6 +627,8 @@ public static class MeshTrimProcessor
                         EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out var insideCount7);
                         if (trimmer != null && trimmer.debugEdgeCrossingRoutes && result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine)
                         {
+                            LogOneLinePolygonAttempt(i / 3, ctx, result, polyFailReason, polyFailDetail);
+                            LogOneLineMajorityBreakdown(i / 3, maskData, ctx, insideCount7);
                             Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={i / 3} fallback_majority7 insideCount={insideCount7} final={(insideCount7 >= 4 ? "WholeKeep" : "WholeTrim")}");
                         }
                     }
@@ -754,6 +756,55 @@ public static class MeshTrimProcessor
 
     private static bool IsLocalCrossingNonDefault(EdgeCrossingTrimRouter.LocalCrossing c)
         => !(c.edgeIndex == 0 && c.edgeStart == 0 && c.edgeEnd == 0 && Mathf.Abs(c.t) <= 1e-8f);
+
+    private static void LogOneLinePolygonAttempt(int triId, EdgeCrossingTrimRouter.TriangleContext ctx, EdgeCrossingTrimRouter.TriangleProcessResult result, string failReason, string failDetail)
+    {
+        TryGetOneLineCrossingsForDebug(result, out var c0, out var c1);
+        Vector2 c0Uv = IsLocalCrossingNonDefault(c0) ? EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, c0) : Vector2.zero;
+        Vector2 c1Uv = IsLocalCrossingNonDefault(c1) ? EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, c1) : Vector2.zero;
+        float srcArea = Mathf.Abs((ctx.uv1.x - ctx.uv0.x) * (ctx.uv2.y - ctx.uv0.y) - (ctx.uv2.x - ctx.uv0.x) * (ctx.uv1.y - ctx.uv0.y)) * 0.5f;
+        for (int p = 0; p < (result.insidePolygons?.Length ?? 0); p++)
+        {
+            var poly = result.insidePolygons[p];
+            if (poly == null || poly.Length == 0) continue;
+            var uvs = new List<Vector2>(poly.Length);
+            for (int i = 0; i < poly.Length; i++)
+            {
+                uvs.Add(poly[i].isOriginalVertex ? (poly[i].originalVertexId == ctx.v0 ? ctx.uv0 : (poly[i].originalVertexId == ctx.v1 ? ctx.uv1 : ctx.uv2)) : EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, poly[i].crossing));
+            }
+            float area = Mathf.Abs(ComputePolygonSignedAreaUvs(uvs));
+            float ratio = srcArea > 0f ? area / srcArea : 0f;
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} polygonAttempt p={p} c0=edge{c0.edgeIndex}({c0.edgeStart}-{c0.edgeEnd}) t={c0.t:F6} before={(c0.isBeforeInside?1:0)} uv={c0Uv} c1=edge{c1.edgeIndex}({c1.edgeStart}-{c1.edgeEnd}) t={c1.t:F6} before={(c1.isBeforeInside?1:0)} uv={c1Uv} polyUvs=[{string.Join(\";\", uvs)}] polyArea={area} srcArea={srcArea} areaRatio={ratio} failReason={failReason} failDetail={failDetail}");
+        }
+    }
+
+    private static float ComputePolygonSignedAreaUvs(List<Vector2> uvs)
+    {
+        float a = 0f;
+        for (int i = 0; i < uvs.Count; i++)
+        {
+            Vector2 p = uvs[i];
+            Vector2 q = uvs[(i + 1) % uvs.Count];
+            a += p.x * q.y - q.x * p.y;
+        }
+        return a * 0.5f;
+    }
+
+    private static void LogOneLineMajorityBreakdown(int triId, AlphaMaskProcessor.AlphaMaskData maskData, EdgeCrossingTrimRouter.TriangleContext ctx, int insideCount)
+    {
+        bool v0 = AlphaMaskProcessor.SampleMask(maskData, ctx.uv0);
+        bool v1 = AlphaMaskProcessor.SampleMask(maskData, ctx.uv1);
+        bool v2 = AlphaMaskProcessor.SampleMask(maskData, ctx.uv2);
+        Vector2 m01 = (ctx.uv0 + ctx.uv1) * 0.5f;
+        Vector2 m12 = (ctx.uv1 + ctx.uv2) * 0.5f;
+        Vector2 m20 = (ctx.uv2 + ctx.uv0) * 0.5f;
+        Vector2 c = (ctx.uv0 + ctx.uv1 + ctx.uv2) / 3f;
+        bool s01 = AlphaMaskProcessor.SampleMask(maskData, m01);
+        bool s12 = AlphaMaskProcessor.SampleMask(maskData, m12);
+        bool s20 = AlphaMaskProcessor.SampleMask(maskData, m20);
+        bool sc = AlphaMaskProcessor.SampleMask(maskData, c);
+        Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} majority7 v0={(v0?1:0)} v1={(v1?1:0)} v2={(v2?1:0)} m01={(s01?1:0)} m12={(s12?1:0)} m20={(s20?1:0)} centroid={(sc?1:0)} insideCount={insideCount} result={(insideCount>=4?\"WholeKeep\":\"WholeTrim\")}");
+    }
 
     private static void EmitMajority7PointTriangle(
         AlphaMaskProcessor.AlphaMaskData maskData,
