@@ -301,7 +301,8 @@ internal static class EdgeCrossingTrimRouter
 
         if (odd == 2 && even == 0) return ProcessTwoOddEdgesAsOneLine(triangle, edgeInfos);
         if (odd == 2 && even == 1) return ProcessTwoOddEdgesAndOneEvenEdge(triangle, edgeInfos);
-        if (odd == 0 && (even == 0 || even == 1)) return MakeWholeByVertexMajority(triangle);
+        if (odd == 0 && even == 0) return MakeWholeByVertexMajority(triangle);
+        if (odd == 0 && even == 1) return MakeWholeBySevenPointMajority(triangle);
         if (odd == 0 && even == 2) return ProcessTwoEvenEdges(triangle, edgeInfos);
         if ((odd == 0 && even == 3) || odd == 1 || odd == 3) return MakeWholeBySevenPointMajority(triangle);
 
