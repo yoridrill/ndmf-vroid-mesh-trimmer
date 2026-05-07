@@ -593,6 +593,7 @@ public static class MeshTrimProcessor
             };
             var result = EdgeCrossingTrimRouter.ProcessTriangle(ctx);
             string majorityFallbackReason = "none";
+            bool oneLineDebugEnabled = trimmer != null && trimmer.debugEdgeCrossingRoutes && ShouldEmitEdgeRouteDebugForMaterial(trimmer, debugMaterialName);
             stats.originalTriangles++;
             if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeKeep)
             {
@@ -616,7 +617,7 @@ public static class MeshTrimProcessor
                     else stats.routeTwoLineEvenEven++;
                     bool emitOk = TryEmitInsidePolygons(result, i0, i1, i2, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                         hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, crossingVertexCache, dstIndices, ref stats, out string polyFailReason, out string polyFailDetail);
-                    if (trimmer != null && trimmer.debugEdgeCrossingRoutes && result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine)
+                    if (oneLineDebugEnabled && result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine)
                     {
                         LogOneLineDebug(i / 3, ctx, result, emitOk, polyFailReason, polyFailDetail);
                     }
@@ -625,7 +626,7 @@ public static class MeshTrimProcessor
                         stats.routeMajorityFallback++;
                         majorityFallbackReason = $"emit_inside_polygons_failed:{polyFailReason}";
                         EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out var insideCount7);
-                        if (trimmer != null && trimmer.debugEdgeCrossingRoutes && result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine)
+                        if (oneLineDebugEnabled && result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine)
                         {
                             LogOneLinePolygonAttempt(i / 3, ctx, result, polyFailReason, polyFailDetail);
                             LogOneLineMajorityBreakdown(i / 3, maskData, ctx, insideCount7);
