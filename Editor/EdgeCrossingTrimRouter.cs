@@ -1104,6 +1104,8 @@ internal static class EdgeCrossingTrimRouter
                 Vector2 p = poly[k].isOriginalVertex ? GetVertexUv(triangle, poly[k].originalVertexId) : GetLocalCrossingUv(triangle, poly[k].crossing);
                 uv.Add(p);
             }
+            SimplifyPolygonUvs(uv, epsilon, out _, out _);
+            if (uv.Count < 3) { failReason = "vertex_count_lt3_after_simplify"; return false; }
 
             for (int a = 0; a < uv.Count; a++)
             {
@@ -1124,6 +1126,50 @@ internal static class EdgeCrossingTrimRouter
             }
         }
         return true;
+    }
+
+    private static void SimplifyPolygonUvs(List<Vector2> uv, float epsilon, out int removedAdjacent, out int removedCollinear)
+    {
+        removedAdjacent = 0;
+        removedCollinear = 0;
+        if (uv == null) return;
+        bool changed = true;
+        while (changed && uv.Count >= 3)
+        {
+            changed = false;
+            for (int i = 0; i < uv.Count; i++)
+            {
+                int j = (i + 1) % uv.Count;
+                if ((uv[i] - uv[j]).sqrMagnitude <= epsilon * epsilon)
+                {
+                    uv.RemoveAt(j);
+                    removedAdjacent++;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        changed = true;
+        while (changed && uv.Count >= 3)
+        {
+            changed = false;
+            for (int i = 0; i < uv.Count; i++)
+            {
+                int prev = (i - 1 + uv.Count) % uv.Count;
+                int next = (i + 1) % uv.Count;
+                Vector2 a = uv[prev];
+                Vector2 b = uv[i];
+                Vector2 c = uv[next];
+                float area2 = Mathf.Abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y));
+                if (area2 <= epsilon)
+                {
+                    uv.RemoveAt(i);
+                    removedCollinear++;
+                    changed = true;
+                    break;
+                }
+            }
+        }
     }
 
     private static float SignedArea(List<Vector2> poly)

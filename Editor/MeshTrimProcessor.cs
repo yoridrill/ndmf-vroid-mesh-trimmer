@@ -961,9 +961,10 @@ public static class MeshTrimProcessor
                 float ratioDbg = srcAreaDbg > 0f ? polyAreaDbg / srcAreaDbg : 0f;
                 Debug.Log($"[NDMF VRoid Mesh Trimmer][PolySimplify] route={result.route} poly={p} beforeCount={before.Count} before=[{string.Join(";", before)}] afterCount={after.Count} after=[{string.Join(";", after)}] removedAdjacent={removedAdjacent} removedCollinear={removedCollinear} areaRatioAfter={ratioDbg}");
             }
-            if (indices.Count < 3) { failReason = "polygon_too_small_after_simplify"; failDetail = $"poly={p}"; return false; }
+            if (indices.Count < 3) { failReason = "polygon_too_small_after_simplify"; failDetail = $"poly={p} polyBeforeSimplify=[{string.Join(";", before)}] polyAfterSimplify=[{string.Join(";", after)}] removedAdjacentDuplicateCount={removedAdjacent} removedCollinearCount={removedCollinear}"; return false; }
             if (!ValidateInsideLoop(indices, i0, i1, i2, uv, trimmer, out failDetail))
             {
+                failDetail = $"{failDetail} polyBeforeSimplify=[{string.Join(";", before)}] polyAfterSimplify=[{string.Join(";", after)}] removedAdjacentDuplicateCount={removedAdjacent} removedCollinearCount={removedCollinear} validationPolygon=[{string.Join(";", after)}]";
                 failReason = "loop_validation_failed";
                 return false;
             }
@@ -992,7 +993,7 @@ public static class MeshTrimProcessor
     {
         removedAdjacent = 0;
         removedCollinear = 0;
-        const float eps = 1e-6f;
+        float eps = Mathf.Sqrt(LoopDuplicateUvEpsilonSqr);
         if (indices == null) return;
 
         bool changed = true;
