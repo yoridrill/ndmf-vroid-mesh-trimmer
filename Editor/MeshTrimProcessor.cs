@@ -615,10 +615,10 @@ public static class MeshTrimProcessor
                     else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge) stats.routeTwoLineOddOddEven++;
                     else stats.routeTwoLineEvenEven++;
                     bool emitOk = TryEmitInsidePolygons(result, i0, i1, i2, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                        hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, crossingVertexCache, dstIndices, ref stats, out string polyFailReason);
+                        hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, crossingVertexCache, dstIndices, ref stats, out string polyFailReason, out string polyFailDetail);
                     if (trimmer != null && trimmer.debugEdgeCrossingRoutes && result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine)
                     {
-                        LogOneLineDebug(i / 3, ctx, result, emitOk, polyFailReason);
+                        LogOneLineDebug(i / 3, ctx, result, emitOk, polyFailReason, polyFailDetail);
                     }
                     if (!emitOk)
                     {
@@ -703,7 +703,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer][EdgeRouteDebug] tri={triId} {parts[0]} {parts[1]} {parts[2]} route={result.route} fallback={majorityFallbackReason}");
     }
 
-    private static void LogOneLineDebug(int triId, EdgeCrossingTrimRouter.TriangleContext ctx, EdgeCrossingTrimRouter.TriangleProcessResult result, bool emitOk, string failReason)
+    private static void LogOneLineDebug(int triId, EdgeCrossingTrimRouter.TriangleContext ctx, EdgeCrossingTrimRouter.TriangleProcessResult result, bool emitOk, string failReason, string failDetail)
     {
         var edgeInfos = EdgeCrossingTrimRouter.BuildEdgeInfos(ctx);
         string e0 = $"e0_after={edgeInfos[0].crossings.Count}";
@@ -717,7 +717,7 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} route={result.route} {e0} {e1} {e2} " +
                   $"c0={(hasPair ? $"(edgeIndex={c0.edgeIndex},edge={c0.edgeStart}-{c0.edgeEnd},t={c0.t:F6},before={(c0.isBeforeInside ? 1 : 0)},uv={aUv})" : "none")} " +
                   $"c1={(hasPair ? $"(edgeIndex={c1.edgeIndex},edge={c1.edgeStart}-{c1.edgeEnd},t={c1.t:F6},before={(c1.isBeforeInside ? 1 : 0)},uv={bUv})" : "none")} " +
-                  $"keptInsideVertices={kept} splitUvDist={d:F8} emitOk={emitOk} emitFailReason={failReason}");
+                  $"keptInsideVertices={kept} splitUvDist={d:F8} emitOk={emitOk} emitFailReason={failReason} emitFailDetail={failDetail}");
     }
 
     private static bool TryGetOneLineCrossingsForDebug(EdgeCrossingTrimRouter.TriangleProcessResult result, out EdgeCrossingTrimRouter.LocalCrossing c0, out EdgeCrossingTrimRouter.LocalCrossing c1)
@@ -879,9 +879,11 @@ public static class MeshTrimProcessor
         Dictionary<(int, int, float), int> crossingVertexCache,
         List<int> dstIndices,
         ref TrimStats stats,
-        out string failReason)
+        out string failReason,
+        out string failDetail)
     {
         failReason = "none";
+        failDetail = "none";
         if (result.insidePolygons == null || result.insidePolygons.Length == 0) { failReason = "empty_inside_polygons"; return false; }
         var staged = new List<(int a, int b, int c)>();
         for (int p = 0; p < result.insidePolygons.Length; p++)
@@ -896,7 +898,7 @@ public static class MeshTrimProcessor
                 else indices.Add(GetOrCreateCrossingVertex(v.crossing, crossingVertexCache, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats));
             }
-            if (!ValidateInsideLoop(indices, i0, i1, i2, uv, trimmer))
+            if (!ValidateInsideLoop(indices, i0, i1, i2, uv, trimmer, out failDetail))
             {
                 failReason = "loop_validation_failed";
                 return false;
@@ -922,27 +924,28 @@ public static class MeshTrimProcessor
         return true;
     }
 
-    private static bool ValidateInsideLoop(List<int> indices, int i0, int i1, int i2, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer)
+    private static bool ValidateInsideLoop(List<int> indices, int i0, int i1, int i2, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, out string failDetail)
     {
-        if (indices == null || indices.Count < 3) return false;
+        failDetail = "none";
+        if (indices == null || indices.Count < 3) { failDetail = "polygon_too_small"; return false; }
         var seen = new HashSet<int>();
         for (int i = 0; i < indices.Count; i++)
         {
-            if (!seen.Add(indices[i])) return false;
+            if (!seen.Add(indices[i])) { failDetail = $"duplicate_vertex:index={indices[i]}"; return false; }
             Vector2 p = uv[indices[i]];
             Vector2 q = uv[indices[(i + 1) % indices.Count]];
-            if ((p - q).sqrMagnitude < LoopDuplicateUvEpsilonSqr) return false;
+            if ((p - q).sqrMagnitude < LoopDuplicateUvEpsilonSqr) { failDetail = $"adjacent_duplicate_uv:i={i}"; return false; }
             for (int j = i + 1; j < indices.Count; j++)
             {
-                if ((p - uv[indices[j]]).sqrMagnitude < LoopDuplicateUvEpsilonSqr) return false;
+                if ((p - uv[indices[j]]).sqrMagnitude < LoopDuplicateUvEpsilonSqr) { failDetail = $"duplicate_uv:i={i},j={j}"; return false; }
             }
         }
         float srcArea = Mathf.Abs((uv[i1].x - uv[i0].x) * (uv[i2].y - uv[i0].y) - (uv[i2].x - uv[i0].x) * (uv[i1].y - uv[i0].y)) * 0.5f;
         float polyArea = Mathf.Abs(ComputePolygonSignedArea(indices, uv));
-        if (polyArea <= 0f) return false;
+        if (polyArea <= 0f) { failDetail = "poly_area_non_positive"; return false; }
         float minAreaRatio = trimmer != null ? Mathf.Clamp(trimmer.edgeCrossingMinPolygonAreaRatio, 0.0001f, 1f) : DefaultMinPolygonAreaRatio;
-        if (srcArea > 0f && polyArea < srcArea * minAreaRatio) return false;
-        if (HasSelfIntersection(indices, uv)) return false;
+        if (srcArea > 0f && polyArea < srcArea * minAreaRatio) { failDetail = $"poly_area_too_small:poly={polyArea},src={srcArea},minRatio={minAreaRatio}"; return false; }
+        if (HasSelfIntersection(indices, uv)) { failDetail = "self_intersection"; return false; }
         return true;
     }
 
