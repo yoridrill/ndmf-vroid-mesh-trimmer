@@ -606,10 +606,10 @@ public static class MeshTrimProcessor
             }
             else
             {
-                if ((result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine
-                    || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge
-                    || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges)
-                    && result.insidePolygons != null && result.insidePolygons.Length > 0)
+                if (result.insidePolygons != null && result.insidePolygons.Length > 0
+                    && (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine
+                        || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge
+                        || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges))
                 {
                     if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine) stats.routeOneLine++;
                     else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge) stats.routeTwoLineOddOddEven++;
@@ -629,6 +629,17 @@ public static class MeshTrimProcessor
                         {
                             Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={i / 3} fallback_majority7 insideCount={insideCount7} final={(insideCount7 >= 4 ? "WholeKeep" : "WholeTrim")}");
                         }
+                    }
+                }
+                else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine && result.hasOneLineSplit && IsValidLegacyOneLinePayload(ctx, result))
+                {
+                    stats.routeOneLine++;
+                    if (!TryEmitOneLineSplit(result, i0, i1, i2, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                        hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, crossingVertexCache, dstIndices, ref stats, out string oneLineFailReason))
+                    {
+                        stats.routeMajorityFallback++;
+                        majorityFallbackReason = $"emit_one_line_failed:{oneLineFailReason}";
+                        EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out _);
                     }
                 }
                 else
@@ -698,15 +709,51 @@ public static class MeshTrimProcessor
         string e0 = $"e0_after={edgeInfos[0].crossings.Count}";
         string e1 = $"e1_after={edgeInfos[1].crossings.Count}";
         string e2 = $"e2_after={edgeInfos[2].crossings.Count}";
-        Vector2 aUv = EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, result.splitCrossingA);
-        Vector2 bUv = EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, result.splitCrossingB);
-        float d = Vector2.Distance(aUv, bUv);
+        bool hasPair = TryGetOneLineCrossingsForDebug(result, out var c0, out var c1);
+        Vector2 aUv = hasPair ? EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, c0) : Vector2.zero;
+        Vector2 bUv = hasPair ? EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, c1) : Vector2.zero;
+        float d = hasPair ? Vector2.Distance(aUv, bUv) : -1f;
         string kept = result.keptInsideVertices == null ? "null" : $"[{string.Join(",", result.keptInsideVertices)}]";
         Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} route={result.route} {e0} {e1} {e2} " +
-                  $"c0=(edgeIndex={result.splitCrossingA.edgeIndex},edge={result.splitCrossingA.edgeStart}-{result.splitCrossingA.edgeEnd},t={result.splitCrossingA.t:F6},before={(result.splitCrossingA.isBeforeInside ? 1 : 0)},uv={aUv}) " +
-                  $"c1=(edgeIndex={result.splitCrossingB.edgeIndex},edge={result.splitCrossingB.edgeStart}-{result.splitCrossingB.edgeEnd},t={result.splitCrossingB.t:F6},before={(result.splitCrossingB.isBeforeInside ? 1 : 0)},uv={bUv}) " +
+                  $"c0={(hasPair ? $"(edgeIndex={c0.edgeIndex},edge={c0.edgeStart}-{c0.edgeEnd},t={c0.t:F6},before={(c0.isBeforeInside ? 1 : 0)},uv={aUv})" : "none")} " +
+                  $"c1={(hasPair ? $"(edgeIndex={c1.edgeIndex},edge={c1.edgeStart}-{c1.edgeEnd},t={c1.t:F6},before={(c1.isBeforeInside ? 1 : 0)},uv={bUv})" : "none")} " +
                   $"keptInsideVertices={kept} splitUvDist={d:F8} emitOk={emitOk} emitFailReason={failReason}");
     }
+
+    private static bool TryGetOneLineCrossingsForDebug(EdgeCrossingTrimRouter.TriangleProcessResult result, out EdgeCrossingTrimRouter.LocalCrossing c0, out EdgeCrossingTrimRouter.LocalCrossing c1)
+    {
+        c0 = default; c1 = default;
+        if (result.insidePolygons != null)
+        {
+            for (int i = 0; i < result.insidePolygons.Length; i++)
+            {
+                var poly = result.insidePolygons[i];
+                if (poly == null) continue;
+                for (int k = 0; k < poly.Length; k++)
+                {
+                    if (!poly[k].isOriginalVertex)
+                    {
+                        if (c0.edgeStart == 0 && c0.edgeEnd == 0 && Mathf.Abs(c0.t) <= 1e-8f) c0 = poly[k].crossing;
+                        else if (c1.edgeStart == 0 && c1.edgeEnd == 0 && Mathf.Abs(c1.t) <= 1e-8f) { c1 = poly[k].crossing; return true; }
+                    }
+                }
+            }
+        }
+        if (IsLocalCrossingNonDefault(result.splitCrossingA) && IsLocalCrossingNonDefault(result.splitCrossingB))
+        { c0 = result.splitCrossingA; c1 = result.splitCrossingB; return true; }
+        return IsLocalCrossingNonDefault(c0) && IsLocalCrossingNonDefault(c1);
+    }
+
+    private static bool IsValidLegacyOneLinePayload(EdgeCrossingTrimRouter.TriangleContext ctx, EdgeCrossingTrimRouter.TriangleProcessResult result)
+    {
+        if (!IsLocalCrossingNonDefault(result.splitCrossingA) || !IsLocalCrossingNonDefault(result.splitCrossingB)) return false;
+        Vector2 a = EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, result.splitCrossingA);
+        Vector2 b = EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, result.splitCrossingB);
+        return (a - b).sqrMagnitude > 1e-12f;
+    }
+
+    private static bool IsLocalCrossingNonDefault(EdgeCrossingTrimRouter.LocalCrossing c)
+        => !(c.edgeIndex == 0 && c.edgeStart == 0 && c.edgeEnd == 0 && Mathf.Abs(c.t) <= 1e-8f);
 
     private static void EmitMajority7PointTriangle(
         AlphaMaskProcessor.AlphaMaskData maskData,
