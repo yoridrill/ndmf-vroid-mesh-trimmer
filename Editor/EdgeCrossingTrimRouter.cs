@@ -939,7 +939,7 @@ internal static class EdgeCrossingTrimRouter
         return triangle.uv2;
     }
 
-    private static Vector2 GetLocalCrossingUv(TriangleContext triangle, LocalCrossing crossing)
+    internal static Vector2 GetLocalCrossingUv(TriangleContext triangle, LocalCrossing crossing)
     {
         Vector2 s = GetVertexUv(triangle, crossing.edgeStart);
         Vector2 e = GetVertexUv(triangle, crossing.edgeEnd);
