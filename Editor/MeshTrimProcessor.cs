@@ -599,6 +599,7 @@ public static class MeshTrimProcessor
             string majorityFallbackReason = "none";
             bool oneLineDebugEnabled = IsOneLineDebugEnabled(trimmer, debugMaterialName);
             string finalAction = "none";
+            int majorityInsideCount = -1;
             stats.originalTriangles++;
             if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeKeep)
             {
@@ -633,6 +634,7 @@ public static class MeshTrimProcessor
                         stats.routeMajorityFallback++;
                         majorityFallbackReason = $"emit_inside_polygons_failed:{polyFailReason}";
                         EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out var insideCount7);
+                        majorityInsideCount = insideCount7;
                         if (oneLineDebugEnabled && result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine)
                         {
                             LogOneLinePolygonAttempt(i / 3, ctx, result, polyFailReason, polyFailDetail);
@@ -652,6 +654,7 @@ public static class MeshTrimProcessor
                         stats.routeMajorityFallback++;
                         majorityFallbackReason = $"emit_one_line_failed:{oneLineFailReason}";
                         EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out _);
+                        majorityInsideCount = -2;
                         finalAction = "FallbackMajority7";
                     }
                     else finalAction = "EmitOneLineLegacySuccess";
@@ -661,6 +664,7 @@ public static class MeshTrimProcessor
                     stats.routeMajorityFallback++;
                     majorityFallbackReason = "route_or_payload_unexpected";
                     EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out _);
+                    majorityInsideCount = -2;
                     finalAction = "FallbackMajority7";
                 }
             }
@@ -686,11 +690,12 @@ public static class MeshTrimProcessor
                         || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges;
                     bool crossingButTrimmed = finalAction == "WholeTrim" && (before0 + before1 + before2) > 0;
                     bool majorityBorderline = majorityFallbackReason.Contains("FallbackMajority7") || majorityFallbackReason.Contains("majority");
+                    bool majorityInside3 = majorityInsideCount == 3;
                     bool normalizationAllRemoved = (before0 + before1 + before2) > 0 && (after0 + after1 + after2) == 0;
                     bool splitEmitFailed = splitRoute && majorityFallbackReason.StartsWith("emit_");
-                    if (crossingButTrimmed || majorityFallbackReason != "none" || normalizationAllRemoved || splitEmitFailed || majorityBorderline)
+                    if (crossingButTrimmed || majorityFallbackReason != "none" || normalizationAllRemoved || splitEmitFailed || majorityBorderline || majorityInside3)
                     {
-                        suspicious.Add($"renderer={renderer.name} subMesh={subMesh} tri={i / 3} route={result.route} final={finalAction} reason={majorityFallbackReason} before=[{before0},{before1},{before2}] after=[{after0},{after1},{after2}] removedEndpointNear={removedNearEndpoint}");
+                        suspicious.Add($"renderer={renderer.name} subMesh={subMesh} tri={i / 3} route={result.route} final={finalAction} reason={majorityFallbackReason} before=[{before0},{before1},{before2}] after=[{after0},{after1},{after2}] removedEndpointNear={removedNearEndpoint} majorityInsideCount={majorityInsideCount}");
                     }
                 }
             }
