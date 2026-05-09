@@ -291,20 +291,20 @@ internal static class EdgeCrossingTrimRouter
         var edgeInfos = BuildEdgeInfos(triangle);
         int odd = 0;
         int even = 0;
-        int zero = 0;
         for (int i = 0; i < edgeInfos.Count; i++)
         {
             if (edgeInfos[i].parityClass == EdgeParityClass.OddEdge) odd++;
             else if (edgeInfos[i].parityClass == EdgeParityClass.EvenEdge) even++;
-            else zero++;
         }
 
-        if (odd == 2 && even == 0) return ProcessTwoOddEdgesAsOneLine(triangle, edgeInfos);
-        if (odd == 2 && even == 1) return ProcessTwoOddEdgesAndOneEvenEdge(triangle, edgeInfos);
-        if (odd == 0 && even == 0) return MakeWholeByVertexMajority(triangle);
-        if (odd == 0 && even == 1) return MakeWholeBySevenPointMajority(triangle);
+        if (odd == 2)
+        {
+            if (even == 0) return ProcessTwoOddEdgesAsOneLine(triangle, edgeInfos);
+            if (even == 1) return ProcessTwoOddEdgesAndOneEvenEdge(triangle, edgeInfos);
+            return MakeWholeBySevenPointMajority(triangle);
+        }
+
         if (odd == 0 && even == 2) return ProcessTwoEvenEdges(triangle, edgeInfos);
-        if ((odd == 0 && even == 3) || odd == 1 || odd == 3) return MakeWholeBySevenPointMajority(triangle);
 
         return MakeWholeBySevenPointMajority(triangle);
     }
@@ -699,6 +699,7 @@ internal static class EdgeCrossingTrimRouter
         if (triangle.SampleInside(triangle.uv0)) inside++;
         if (triangle.SampleInside(triangle.uv1)) inside++;
         if (triangle.SampleInside(triangle.uv2)) inside++;
+        if (inside >= 4) return true;
 
         Vector2 m01 = (triangle.uv0 + triangle.uv1) * 0.5f;
         Vector2 m12 = (triangle.uv1 + triangle.uv2) * 0.5f;
@@ -706,8 +707,11 @@ internal static class EdgeCrossingTrimRouter
         Vector2 centroid = (triangle.uv0 + triangle.uv1 + triangle.uv2) / 3f;
 
         if (triangle.SampleInside(m01)) inside++;
+        if (inside >= 4) return true;
         if (triangle.SampleInside(m12)) inside++;
+        if (inside >= 4) return true;
         if (triangle.SampleInside(m20)) inside++;
+        if (inside >= 4) return true;
         if (triangle.SampleInside(centroid)) inside++;
 
         return inside >= 4;
