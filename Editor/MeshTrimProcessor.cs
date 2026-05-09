@@ -578,6 +578,10 @@ public static class MeshTrimProcessor
     {
         var shared = BuildSharedCrossings(srcIndices, maskData, uv, trimmer, out var rawCrossingCounts);
         TrimStats stats = new TrimStats();
+        var debugRouteCounts = new Dictionary<string, int>();
+        var debugFallbackCounts = new Dictionary<string, int>();
+        var suspicious = new List<string>();
+        const int suspiciousMax = 20;
         var crossingVertexCache = new Dictionary<(int, int, float), int>();
         for (int i = 0; i < srcIndices.Length; i += 3)
         {
@@ -594,16 +598,19 @@ public static class MeshTrimProcessor
             var result = EdgeCrossingTrimRouter.ProcessTriangle(ctx);
             string majorityFallbackReason = "none";
             bool oneLineDebugEnabled = IsOneLineDebugEnabled(trimmer, debugMaterialName);
+            string finalAction = "none";
             stats.originalTriangles++;
             if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeKeep)
             {
                 stats.routeWholeKeep++;
                 AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats, skipAreaThresholds: true);
+                finalAction = "WholeKeep";
             }
             else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeTrim)
             {
                 stats.routeWholeTrim++;
                 stats.removedTriangles++;
+                finalAction = "WholeTrim";
             }
             else
             {
@@ -632,7 +639,9 @@ public static class MeshTrimProcessor
                             LogOneLineMajorityBreakdown(i / 3, maskData, ctx, insideCount7);
                             Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={i / 3} fallback_majority7 insideCount={insideCount7} final={(insideCount7 >= 4 ? "WholeKeep" : "WholeTrim")}");
                         }
+                        finalAction = "FallbackMajority7";
                     }
+                    else finalAction = "EmitInsidePolygonsSuccess";
                 }
                 else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine && result.hasOneLineSplit && IsValidLegacyOneLinePayload(ctx, result))
                 {
@@ -643,13 +652,26 @@ public static class MeshTrimProcessor
                         stats.routeMajorityFallback++;
                         majorityFallbackReason = $"emit_one_line_failed:{oneLineFailReason}";
                         EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out _);
+                        finalAction = "FallbackMajority7";
                     }
+                    else finalAction = "EmitOneLineLegacySuccess";
                 }
                 else
                 {
                     stats.routeMajorityFallback++;
                     majorityFallbackReason = "route_or_payload_unexpected";
                     EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out _);
+                    finalAction = "FallbackMajority7";
+                }
+            }
+            if (trimmer != null && trimmer.debugEdgeCrossingRoutes)
+            {
+                string rk = result.route.ToString();
+                debugRouteCounts[rk] = debugRouteCounts.TryGetValue(rk, out var rc) ? rc + 1 : 1;
+                if (majorityFallbackReason != "none") debugFallbackCounts[majorityFallbackReason] = debugFallbackCounts.TryGetValue(majorityFallbackReason, out var fc) ? fc + 1 : 1;
+                if (suspicious.Count < suspiciousMax && result.route != EdgeCrossingTrimRouter.TriangleRoute.WholeKeep && result.route != EdgeCrossingTrimRouter.TriangleRoute.WholeTrim && majorityFallbackReason != "none")
+                {
+                    suspicious.Add($"tri={i / 3} route={result.route} final={finalAction} reason={majorityFallbackReason}");
                 }
             }
             if (trimmer != null && trimmer.debugEdgeCrossingRoutes && ShouldEmitEdgeRouteDebugForMaterial(trimmer, debugMaterialName))
@@ -658,7 +680,21 @@ public static class MeshTrimProcessor
             }
         }
 
+        if (trimmer != null && trimmer.debugEdgeCrossingRoutes)
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][EdgeRouteSummary] renderer={renderer.name} subMesh={subMesh} material={debugMaterialName} triangles={stats.originalTriangles} routes={FormatCountMap(debugRouteCounts)} fallbacks={FormatCountMap(debugFallbackCounts)} suspiciousCount={suspicious.Count}");
+            for (int i = 0; i < suspicious.Count; i++) Debug.Log($"[NDMF VRoid Mesh Trimmer][EdgeRouteSuspicious] {suspicious[i]}");
+        }
+
         return stats;
+    }
+
+    private static string FormatCountMap(Dictionary<string, int> map)
+    {
+        if (map == null || map.Count == 0) return "{}";
+        var items = new List<string>(map.Count);
+        foreach (var kv in map) items.Add($"{kv.Key}:{kv.Value}");
+        return "{" + string.Join(",", items) + "}";
     }
 
     private static bool ShouldEmitEdgeRouteDebugForMaterial(NDMFVRoidMeshTrimmer trimmer, string materialName)
