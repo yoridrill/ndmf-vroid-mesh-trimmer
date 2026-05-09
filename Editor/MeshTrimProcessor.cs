@@ -669,9 +669,29 @@ public static class MeshTrimProcessor
                 string rk = result.route.ToString();
                 debugRouteCounts[rk] = debugRouteCounts.TryGetValue(rk, out var rc) ? rc + 1 : 1;
                 if (majorityFallbackReason != "none") debugFallbackCounts[majorityFallbackReason] = debugFallbackCounts.TryGetValue(majorityFallbackReason, out var fc) ? fc + 1 : 1;
-                if (suspicious.Count < suspiciousMax && result.route != EdgeCrossingTrimRouter.TriangleRoute.WholeKeep && result.route != EdgeCrossingTrimRouter.TriangleRoute.WholeTrim && majorityFallbackReason != "none")
+                if (suspicious.Count < suspiciousMax)
                 {
-                    suspicious.Add($"tri={i / 3} route={result.route} final={finalAction} reason={majorityFallbackReason}");
+                    int[] s = { ctx.v0, ctx.v1, ctx.v2 };
+                    int[] e = { ctx.v1, ctx.v2, ctx.v0 };
+                    var infos = EdgeCrossingTrimRouter.BuildEdgeInfos(ctx);
+                    int before0 = rawCrossingCounts != null && rawCrossingCounts.TryGetValue(new EdgeCrossingTrimRouter.EdgeKey(s[0], e[0]), out var b0) ? b0 : 0;
+                    int before1 = rawCrossingCounts != null && rawCrossingCounts.TryGetValue(new EdgeCrossingTrimRouter.EdgeKey(s[1], e[1]), out var b1) ? b1 : 0;
+                    int before2 = rawCrossingCounts != null && rawCrossingCounts.TryGetValue(new EdgeCrossingTrimRouter.EdgeKey(s[2], e[2]), out var b2) ? b2 : 0;
+                    int after0 = infos[0].crossings.Count;
+                    int after1 = infos[1].crossings.Count;
+                    int after2 = infos[2].crossings.Count;
+                    int removedNearEndpoint = Mathf.Max(0, before0 - after0) + Mathf.Max(0, before1 - after1) + Mathf.Max(0, before2 - after2);
+                    bool splitRoute = result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine
+                        || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge
+                        || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges;
+                    bool crossingButTrimmed = finalAction == "WholeTrim" && (before0 + before1 + before2) > 0;
+                    bool majorityBorderline = majorityFallbackReason.Contains("FallbackMajority7") || majorityFallbackReason.Contains("majority");
+                    bool normalizationAllRemoved = (before0 + before1 + before2) > 0 && (after0 + after1 + after2) == 0;
+                    bool splitEmitFailed = splitRoute && majorityFallbackReason.StartsWith("emit_");
+                    if (crossingButTrimmed || majorityFallbackReason != "none" || normalizationAllRemoved || splitEmitFailed || majorityBorderline)
+                    {
+                        suspicious.Add($"renderer={renderer.name} subMesh={subMesh} tri={i / 3} route={result.route} final={finalAction} reason={majorityFallbackReason} before=[{before0},{before1},{before2}] after=[{after0},{after1},{after2}] removedEndpointNear={removedNearEndpoint}");
+                    }
                 }
             }
             if (trimmer != null && trimmer.debugEdgeCrossingRoutes && ShouldEmitEdgeRouteDebugForMaterial(trimmer, debugMaterialName))
