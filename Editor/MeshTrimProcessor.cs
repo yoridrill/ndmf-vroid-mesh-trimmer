@@ -632,7 +632,7 @@ public static class MeshTrimProcessor
                     if (!emitOk)
                     {
                         stats.routeMajorityFallback++;
-                        majorityFallbackReason = $"emit_inside_polygons_failed:{polyFailReason}";
+                        majorityFallbackReason = $"emit_inside_polygons_failed:{polyFailReason}:{polyFailDetail}";
                         EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out var insideCount7);
                         majorityInsideCount = insideCount7;
                         if (oneLineDebugEnabled && result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine)
@@ -693,9 +693,10 @@ public static class MeshTrimProcessor
                     bool majorityInside3 = majorityInsideCount == 3;
                     bool normalizationAllRemoved = (before0 + before1 + before2) > 0 && (after0 + after1 + after2) == 0;
                     bool splitEmitFailed = splitRoute && majorityFallbackReason.StartsWith("emit_");
-                    if (crossingButTrimmed || majorityFallbackReason != "none" || normalizationAllRemoved || splitEmitFailed || majorityBorderline || majorityInside3)
+                    bool splitEmitFailedWithLargeArea = splitEmitFailed && TryExtractFloatFromReason(majorityFallbackReason, "polygonAreaRatio=", out var areaRatio) && TryExtractFloatFromReason(majorityFallbackReason, "minRatio=", out var minRatio) && areaRatio >= minRatio;
+                    if (crossingButTrimmed || majorityFallbackReason != "none" || normalizationAllRemoved || splitEmitFailed || majorityBorderline || majorityInside3 || splitEmitFailedWithLargeArea)
                     {
-                        suspicious.Add($"renderer={renderer.name} subMesh={subMesh} tri={i / 3} route={result.route} final={finalAction} reason={majorityFallbackReason} before=[{before0},{before1},{before2}] after=[{after0},{after1},{after2}] removedEndpointNear={removedNearEndpoint} majorityInsideCount={majorityInsideCount}");
+                        suspicious.Add($"renderer={renderer.name} subMesh={subMesh} tri={i / 3} route={result.route} final={finalAction} reason={majorityFallbackReason} before=[{before0},{before1},{before2}] after=[{after0},{after1},{after2}] removedEndpointNear={removedNearEndpoint} majorityInsideCount={majorityInsideCount} splitEmitFailedWithLargeArea={(splitEmitFailedWithLargeArea?1:0)}");
                     }
                 }
             }
@@ -720,6 +721,24 @@ public static class MeshTrimProcessor
         var items = new List<string>(map.Count);
         foreach (var kv in map) items.Add($"{kv.Key}:{kv.Value}");
         return "{" + string.Join(",", items) + "}";
+    }
+
+    private static bool TryExtractFloatFromReason(string text, string key, out float value)
+    {
+        value = 0f;
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(key)) return false;
+        int idx = text.IndexOf(key, StringComparison.Ordinal);
+        if (idx < 0) return false;
+        idx += key.Length;
+        int end = idx;
+        while (end < text.Length)
+        {
+            char c = text[end];
+            if ((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+') { end++; continue; }
+            break;
+        }
+        if (end <= idx) return false;
+        return float.TryParse(text.Substring(idx, end - idx), out value);
     }
 
     private static bool ShouldEmitEdgeRouteDebugForMaterial(NDMFVRoidMeshTrimmer trimmer, string materialName)
