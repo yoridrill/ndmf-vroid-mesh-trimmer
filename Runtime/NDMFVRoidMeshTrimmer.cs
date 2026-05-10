@@ -56,21 +56,24 @@ public class NDMFVRoidMeshTrimmer : MonoBehaviour, IEditorOnly
 
     [Range(0f, 1f)] public float alphaThreshold = 0.5f;
     [Min(0)] public int maskDilatePixels = 2;
-    [Min(0)] public int maskClosePixels = 1;
-    [Min(0)] public int fillSmallHolesPixels = 16;
-    [Min(0)] public int removeSmallIslandsPixels = 16;
+    [Min(0)] public int maskCleanupPixels = 16;
 
     [Range(0f, 1f)] public float minIntersectionT = 0.02f;
 
     [Range(0f, 1f)] public float maxIntersectionT = 0.98f;
 
-    [Min(0f)] public float minTriangleUvArea = 0.0000001f;
-    [Min(0f)] public float minTriangleWorldArea = 0.0000001f;
-    [Range(0.00001f, 0.1f)] public float edgeCrossingMergeEpsilon = 0.001f;
-    [Range(0.00001f, 0.1f)] public float edgeCrossingEndpointSnapEpsilon = 0.001f;
-    [Range(0.00001f, 0.1f)] public float edgeCrossingCacheQuantizeStep = 0.001f;
-    [Range(0.0001f, 0.1f)] public float edgeCrossingMinPolygonAreaRatio = 0.01f;
-    [Range(0.0001f, 0.2f)] public float edgeCrossingMinChordLengthRatio = 0.03f;
+    [Range(0.01f, 2.0f)] public float minimumFragmentSizePermille = 0.2f;
+
+    [HideInInspector] [Min(0)] public int maskClosePixels = 1;
+    [HideInInspector] [Min(0)] public int fillSmallHolesPixels = 16;
+    [HideInInspector] [Min(0)] public int removeSmallIslandsPixels = 16;
+    [HideInInspector] [Min(0f)] public float minTriangleUvArea = 1e-10f;
+    [HideInInspector] [Min(0f)] public float minTriangleWorldArea = 1e-12f;
+    [HideInInspector] [Range(0.00001f, 0.1f)] public float edgeCrossingMergeEpsilon = 0.001f;
+    [HideInInspector] [Range(0.00001f, 0.1f)] public float edgeCrossingEndpointSnapEpsilon = 0.001f;
+    [HideInInspector] [Range(0.00001f, 0.1f)] public float edgeCrossingCacheQuantizeStep = 0.001f;
+    [HideInInspector] [Range(0.0001f, 0.1f)] public float edgeCrossingMinPolygonAreaRatio = 0.0002f;
+    [HideInInspector] [Range(0.0001f, 0.2f)] public float edgeCrossingMinChordLengthRatio = 0.014142f;
 
     [SerializeField] private bool previewActiveSerialized;
     [SerializeField] private List<PreviewRecoveryRecord> previewRecoveryRecords = new List<PreviewRecoveryRecord>();

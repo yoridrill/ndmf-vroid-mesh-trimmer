@@ -170,6 +170,7 @@ public static class MeshTrimProcessor
         NDMFVRoidMeshTrimmer trimmer,
         bool preserveBlendShapes)
     {
+        ApplyDerivedMeshSettings(trimmer);
         Mesh src = renderer.sharedMesh;
         if (src == null)
         {
@@ -306,6 +307,19 @@ public static class MeshTrimProcessor
         dst.RecalculateBounds();
         renderer.sharedMesh = dst;
         RestoreBlendShapeWeights(renderer, dst, savedBlendShapeNames, savedBlendShapeWeights);
+    }
+
+    private static void ApplyDerivedMeshSettings(NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (trimmer == null) return;
+        float minFragmentRatio = Mathf.Clamp(trimmer.minimumFragmentSizePermille, 0.01f, 2.0f) * 0.001f;
+        trimmer.edgeCrossingMinPolygonAreaRatio = minFragmentRatio;
+        trimmer.edgeCrossingMinChordLengthRatio = Mathf.Sqrt(minFragmentRatio);
+        trimmer.minTriangleUvArea = 1e-10f;
+        trimmer.minTriangleWorldArea = 1e-12f;
+        trimmer.edgeCrossingMergeEpsilon = 0.001f;
+        trimmer.edgeCrossingEndpointSnapEpsilon = 0.001f;
+        trimmer.edgeCrossingCacheQuantizeStep = 0.001f;
     }
 
     private static int[] PreSubdivideIndices(
