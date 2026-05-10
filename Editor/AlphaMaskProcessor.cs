@@ -49,19 +49,24 @@ public static class AlphaMaskProcessor
             Dilate(mask, width, height, settings.maskDilatePixels);
         }
 
-        if (settings.maskClosePixels > 0)
+        int cleanup = Mathf.Max(0, settings.maskCleanupPixels);
+        int closePx = cleanup <= 1 ? cleanup : Mathf.Max(1, cleanup / 4);
+        int fillHolesPx = cleanup;
+        int removeIslandsPx = cleanup;
+
+        if (closePx > 0)
         {
-            Close(mask, width, height, settings.maskClosePixels);
+            Close(mask, width, height, closePx);
         }
 
-        if (settings.fillSmallHolesPixels > 0)
+        if (fillHolesPx > 0)
         {
-            FillSmallHoles(mask, width, height, settings.fillSmallHolesPixels);
+            FillSmallHoles(mask, width, height, fillHolesPx);
         }
 
-        if (settings.removeSmallIslandsPixels > 0)
+        if (removeIslandsPx > 0)
         {
-            RemoveSmallIslands(mask, width, height, settings.removeSmallIslandsPixels);
+            RemoveSmallIslands(mask, width, height, removeIslandsPx);
         }
 
         data = new AlphaMaskData

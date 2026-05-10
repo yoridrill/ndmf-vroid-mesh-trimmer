@@ -170,6 +170,7 @@ public static class MeshTrimProcessor
         NDMFVRoidMeshTrimmer trimmer,
         bool preserveBlendShapes)
     {
+        ApplyDerivedMeshSettings(trimmer);
         Mesh src = renderer.sharedMesh;
         if (src == null)
         {
@@ -306,6 +307,19 @@ public static class MeshTrimProcessor
         dst.RecalculateBounds();
         renderer.sharedMesh = dst;
         RestoreBlendShapeWeights(renderer, dst, savedBlendShapeNames, savedBlendShapeWeights);
+    }
+
+    private static void ApplyDerivedMeshSettings(NDMFVRoidMeshTrimmer trimmer)
+    {
+        if (trimmer == null) return;
+        float minFragmentRatio = Mathf.Clamp(trimmer.minimumFragmentSizePermille, 0.01f, 2.0f) * 0.001f;
+        trimmer.edgeCrossingMinPolygonAreaRatio = minFragmentRatio;
+        trimmer.edgeCrossingMinChordLengthRatio = Mathf.Sqrt(minFragmentRatio);
+        trimmer.minTriangleUvArea = 1e-10f;
+        trimmer.minTriangleWorldArea = 1e-12f;
+        trimmer.edgeCrossingMergeEpsilon = 0.001f;
+        trimmer.edgeCrossingEndpointSnapEpsilon = 0.001f;
+        trimmer.edgeCrossingCacheQuantizeStep = 0.001f;
     }
 
     private static int[] PreSubdivideIndices(
@@ -578,6 +592,10 @@ public static class MeshTrimProcessor
     {
         var shared = BuildSharedCrossings(srcIndices, maskData, uv, trimmer, out var rawCrossingCounts);
         TrimStats stats = new TrimStats();
+        var debugRouteCounts = new Dictionary<string, int>();
+        var debugFallbackCounts = new Dictionary<string, int>();
+        var suspicious = new List<string>();
+        const int suspiciousMax = 20;
         var crossingVertexCache = new Dictionary<(int, int, float), int>();
         for (int i = 0; i < srcIndices.Length; i += 3)
         {
@@ -593,20 +611,55 @@ public static class MeshTrimProcessor
             };
             var result = EdgeCrossingTrimRouter.ProcessTriangle(ctx);
             string majorityFallbackReason = "none";
+            bool oneLineDebugEnabled = IsOneLineDebugEnabled(trimmer, debugMaterialName);
+            string finalAction = "none";
+            int majorityInsideCount = -1;
             stats.originalTriangles++;
             if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeKeep)
             {
                 stats.routeWholeKeep++;
                 AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats, skipAreaThresholds: true);
+                finalAction = "WholeKeep";
             }
             else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.WholeTrim)
             {
                 stats.routeWholeTrim++;
                 stats.removedTriangles++;
+                finalAction = "WholeTrim";
             }
             else
             {
-                if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine && result.hasOneLineSplit)
+                if (result.insidePolygons != null && result.insidePolygons.Length > 0
+                    && (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine
+                        || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge
+                        || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges))
+                {
+                    if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine) stats.routeOneLine++;
+                    else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge) stats.routeTwoLineOddOddEven++;
+                    else stats.routeTwoLineEvenEven++;
+                    bool emitOk = TryEmitInsidePolygons(result, i0, i1, i2, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
+                        hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, crossingVertexCache, dstIndices, ref stats, out string polyFailReason, out string polyFailDetail);
+                    if (oneLineDebugEnabled && result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine)
+                    {
+                        LogOneLineDebug(i / 3, ctx, result, emitOk, polyFailReason, polyFailDetail);
+                    }
+                    if (!emitOk)
+                    {
+                        stats.routeMajorityFallback++;
+                        majorityFallbackReason = $"emit_inside_polygons_failed:{polyFailReason}:{polyFailDetail}";
+                        EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out var insideCount7);
+                        majorityInsideCount = insideCount7;
+                        if (oneLineDebugEnabled && result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine)
+                        {
+                            LogOneLinePolygonAttempt(i / 3, ctx, result, polyFailReason, polyFailDetail);
+                            LogOneLineMajorityBreakdown(i / 3, maskData, ctx, insideCount7);
+                            Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={i / 3} fallback_majority7 insideCount={insideCount7} final={(insideCount7 >= 4 ? "WholeKeep" : "WholeTrim")}");
+                        }
+                        finalAction = "FallbackMajority7";
+                    }
+                    else finalAction = "EmitInsidePolygonsSuccess";
+                }
+                else if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine && result.hasOneLineSplit && IsValidLegacyOneLinePayload(ctx, result))
                 {
                     stats.routeOneLine++;
                     if (!TryEmitOneLineSplit(result, i0, i1, i2, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
@@ -614,26 +667,51 @@ public static class MeshTrimProcessor
                     {
                         stats.routeMajorityFallback++;
                         majorityFallbackReason = $"emit_one_line_failed:{oneLineFailReason}";
-                        EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
+                        EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out _);
+                        majorityInsideCount = -2;
+                        finalAction = "FallbackMajority7";
                     }
-                }
-                else if ((result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges) && result.hasTwoLineSplit)
-                {
-                    if (result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge) stats.routeTwoLineOddOddEven++;
-                    else stats.routeTwoLineEvenEven++;
-                    if (!TryEmitInsidePolygons(result, i0, i1, i2, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
-                        hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, crossingVertexCache, dstIndices, ref stats, out string polyFailReason))
-                    {
-                        stats.routeMajorityFallback++;
-                        majorityFallbackReason = $"emit_two_line_failed:{polyFailReason}";
-                        EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
-                    }
+                    else finalAction = "EmitOneLineLegacySuccess";
                 }
                 else
                 {
                     stats.routeMajorityFallback++;
                     majorityFallbackReason = "route_or_payload_unexpected";
-                    EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats);
+                    EmitMajority7PointTriangle(maskData, trimmer, i0, i1, i2, vertices, uv, dstIndices, ref stats, out _);
+                    majorityInsideCount = -2;
+                    finalAction = "FallbackMajority7";
+                }
+            }
+            if (trimmer != null && trimmer.debugEdgeCrossingRoutes)
+            {
+                string rk = result.route.ToString();
+                debugRouteCounts[rk] = debugRouteCounts.TryGetValue(rk, out var rc) ? rc + 1 : 1;
+                if (majorityFallbackReason != "none") debugFallbackCounts[majorityFallbackReason] = debugFallbackCounts.TryGetValue(majorityFallbackReason, out var fc) ? fc + 1 : 1;
+                if (suspicious.Count < suspiciousMax)
+                {
+                    int[] s = { ctx.v0, ctx.v1, ctx.v2 };
+                    int[] e = { ctx.v1, ctx.v2, ctx.v0 };
+                    var infos = EdgeCrossingTrimRouter.BuildEdgeInfos(ctx);
+                    int before0 = rawCrossingCounts != null && rawCrossingCounts.TryGetValue(new EdgeCrossingTrimRouter.EdgeKey(s[0], e[0]), out var b0) ? b0 : 0;
+                    int before1 = rawCrossingCounts != null && rawCrossingCounts.TryGetValue(new EdgeCrossingTrimRouter.EdgeKey(s[1], e[1]), out var b1) ? b1 : 0;
+                    int before2 = rawCrossingCounts != null && rawCrossingCounts.TryGetValue(new EdgeCrossingTrimRouter.EdgeKey(s[2], e[2]), out var b2) ? b2 : 0;
+                    int after0 = infos[0].crossings.Count;
+                    int after1 = infos[1].crossings.Count;
+                    int after2 = infos[2].crossings.Count;
+                    int removedNearEndpoint = Mathf.Max(0, before0 - after0) + Mathf.Max(0, before1 - after1) + Mathf.Max(0, before2 - after2);
+                    bool splitRoute = result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAsOneLine
+                        || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoOddEdgesAndOneEvenEdge
+                        || result.route == EdgeCrossingTrimRouter.TriangleRoute.TwoEvenEdges;
+                    bool crossingButTrimmed = finalAction == "WholeTrim" && (before0 + before1 + before2) > 0;
+                    bool majorityBorderline = majorityFallbackReason.Contains("FallbackMajority7") || majorityFallbackReason.Contains("majority");
+                    bool majorityInside3 = majorityInsideCount == 3;
+                    bool normalizationAllRemoved = (before0 + before1 + before2) > 0 && (after0 + after1 + after2) == 0;
+                    bool splitEmitFailed = splitRoute && majorityFallbackReason.StartsWith("emit_");
+                    bool splitEmitFailedWithLargeArea = splitEmitFailed && TryExtractFloatFromReason(majorityFallbackReason, "polygonAreaRatio=", out var areaRatio) && TryExtractFloatFromReason(majorityFallbackReason, "minRatio=", out var minRatio) && areaRatio >= minRatio;
+                    if (crossingButTrimmed || majorityFallbackReason != "none" || normalizationAllRemoved || splitEmitFailed || majorityBorderline || majorityInside3 || splitEmitFailedWithLargeArea)
+                    {
+                        suspicious.Add($"renderer={renderer.name} subMesh={subMesh} tri={i / 3} route={result.route} final={finalAction} reason={majorityFallbackReason} before=[{before0},{before1},{before2}] after=[{after0},{after1},{after2}] removedEndpointNear={removedNearEndpoint} majorityInsideCount={majorityInsideCount} splitEmitFailedWithLargeArea={(splitEmitFailedWithLargeArea?1:0)}");
+                    }
                 }
             }
             if (trimmer != null && trimmer.debugEdgeCrossingRoutes && ShouldEmitEdgeRouteDebugForMaterial(trimmer, debugMaterialName))
@@ -642,7 +720,39 @@ public static class MeshTrimProcessor
             }
         }
 
+        if (trimmer != null && trimmer.debugEdgeCrossingRoutes)
+        {
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][EdgeRouteSummary] renderer={renderer.name} subMesh={subMesh} material={debugMaterialName} triangles={stats.originalTriangles} routes={FormatCountMap(debugRouteCounts)} fallbacks={FormatCountMap(debugFallbackCounts)} suspiciousCount={suspicious.Count}");
+            for (int i = 0; i < suspicious.Count; i++) Debug.Log($"[NDMF VRoid Mesh Trimmer][EdgeRouteSuspicious] {suspicious[i]}");
+        }
+
         return stats;
+    }
+
+    private static string FormatCountMap(Dictionary<string, int> map)
+    {
+        if (map == null || map.Count == 0) return "{}";
+        var items = new List<string>(map.Count);
+        foreach (var kv in map) items.Add($"{kv.Key}:{kv.Value}");
+        return "{" + string.Join(",", items) + "}";
+    }
+
+    private static bool TryExtractFloatFromReason(string text, string key, out float value)
+    {
+        value = 0f;
+        if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(key)) return false;
+        int idx = text.IndexOf(key, StringComparison.Ordinal);
+        if (idx < 0) return false;
+        idx += key.Length;
+        int end = idx;
+        while (end < text.Length)
+        {
+            char c = text[end];
+            if ((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+') { end++; continue; }
+            break;
+        }
+        if (end <= idx) return false;
+        return float.TryParse(text.Substring(idx, end - idx), out value);
     }
 
     private static bool ShouldEmitEdgeRouteDebugForMaterial(NDMFVRoidMeshTrimmer trimmer, string materialName)
@@ -659,6 +769,13 @@ public static class MeshTrimProcessor
             if (name.Contains(f.ToLowerInvariant())) return true;
         }
         return false;
+    }
+
+    private static bool IsOneLineDebugEnabled(NDMFVRoidMeshTrimmer trimmer, string materialName)
+    {
+        return trimmer != null
+            && trimmer.debugEdgeCrossingRoutes
+            && ShouldEmitEdgeRouteDebugForMaterial(trimmer, materialName);
     }
 
     private static void LogEdgeRouteTriangleDebug(
@@ -690,6 +807,127 @@ public static class MeshTrimProcessor
         Debug.Log($"[NDMF VRoid Mesh Trimmer][EdgeRouteDebug] tri={triId} {parts[0]} {parts[1]} {parts[2]} route={result.route} fallback={majorityFallbackReason}");
     }
 
+    private static void LogOneLineDebug(int triId, EdgeCrossingTrimRouter.TriangleContext ctx, EdgeCrossingTrimRouter.TriangleProcessResult result, bool emitOk, string failReason, string failDetail)
+    {
+        var edgeInfos = EdgeCrossingTrimRouter.BuildEdgeInfos(ctx);
+        string e0 = $"e0_after={edgeInfos[0].crossings.Count}";
+        string e1 = $"e1_after={edgeInfos[1].crossings.Count}";
+        string e2 = $"e2_after={edgeInfos[2].crossings.Count}";
+        bool hasPair = TryGetOneLineCrossingsForDebug(result, out var c0, out var c1);
+        Vector2 aUv = hasPair ? EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, c0) : Vector2.zero;
+        Vector2 bUv = hasPair ? EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, c1) : Vector2.zero;
+        float d = hasPair ? Vector2.Distance(aUv, bUv) : -1f;
+        string kept = result.keptInsideVertices == null ? "null" : $"[{string.Join(",", result.keptInsideVertices)}]";
+        Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} route={result.route} {e0} {e1} {e2} " +
+                  $"c0={(hasPair ? $"(edgeIndex={c0.edgeIndex},edge={c0.edgeStart}-{c0.edgeEnd},t={c0.t:F6},before={(c0.isBeforeInside ? 1 : 0)},uv={aUv})" : "none")} " +
+                  $"c1={(hasPair ? $"(edgeIndex={c1.edgeIndex},edge={c1.edgeStart}-{c1.edgeEnd},t={c1.t:F6},before={(c1.isBeforeInside ? 1 : 0)},uv={bUv})" : "none")} " +
+                  $"keptInsideVertices={kept} splitUvDist={d:F8} emitOk={emitOk} emitFailReason={failReason} emitFailDetail={failDetail}");
+    }
+
+    private static bool TryGetOneLineCrossingsForDebug(EdgeCrossingTrimRouter.TriangleProcessResult result, out EdgeCrossingTrimRouter.LocalCrossing c0, out EdgeCrossingTrimRouter.LocalCrossing c1)
+    {
+        c0 = default; c1 = default;
+        if (result.insidePolygons != null)
+        {
+            for (int i = 0; i < result.insidePolygons.Length; i++)
+            {
+                var poly = result.insidePolygons[i];
+                if (poly == null) continue;
+                for (int k = 0; k < poly.Length; k++)
+                {
+                    if (!poly[k].isOriginalVertex)
+                    {
+                        if (c0.edgeStart == 0 && c0.edgeEnd == 0 && Mathf.Abs(c0.t) <= 1e-8f) c0 = poly[k].crossing;
+                        else if (c1.edgeStart == 0 && c1.edgeEnd == 0 && Mathf.Abs(c1.t) <= 1e-8f) { c1 = poly[k].crossing; return true; }
+                    }
+                }
+            }
+        }
+        if (IsLocalCrossingNonDefault(result.splitCrossingA) && IsLocalCrossingNonDefault(result.splitCrossingB))
+        { c0 = result.splitCrossingA; c1 = result.splitCrossingB; return true; }
+        return IsLocalCrossingNonDefault(c0) && IsLocalCrossingNonDefault(c1);
+    }
+
+    private static bool IsValidLegacyOneLinePayload(EdgeCrossingTrimRouter.TriangleContext ctx, EdgeCrossingTrimRouter.TriangleProcessResult result)
+    {
+        if (!IsLocalCrossingNonDefault(result.splitCrossingA) || !IsLocalCrossingNonDefault(result.splitCrossingB)) return false;
+        Vector2 a = EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, result.splitCrossingA);
+        Vector2 b = EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, result.splitCrossingB);
+        return (a - b).sqrMagnitude > 1e-12f;
+    }
+
+    private static bool IsLocalCrossingNonDefault(EdgeCrossingTrimRouter.LocalCrossing c)
+        => !(c.edgeIndex == 0 && c.edgeStart == 0 && c.edgeEnd == 0 && Mathf.Abs(c.t) <= 1e-8f);
+
+    private static void LogOneLinePolygonAttempt(int triId, EdgeCrossingTrimRouter.TriangleContext ctx, EdgeCrossingTrimRouter.TriangleProcessResult result, string failReason, string failDetail)
+    {
+        TryGetOneLineCrossingsForDebug(result, out var c0, out var c1);
+        Vector2 c0Uv = IsLocalCrossingNonDefault(c0) ? EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, c0) : Vector2.zero;
+        Vector2 c1Uv = IsLocalCrossingNonDefault(c1) ? EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, c1) : Vector2.zero;
+        float srcArea = Mathf.Abs((ctx.uv1.x - ctx.uv0.x) * (ctx.uv2.y - ctx.uv0.y) - (ctx.uv2.x - ctx.uv0.x) * (ctx.uv1.y - ctx.uv0.y)) * 0.5f;
+        for (int p = 0; p < (result.insidePolygons?.Length ?? 0); p++)
+        {
+            var poly = result.insidePolygons[p];
+            if (poly == null || poly.Length == 0) continue;
+            var uvs = new List<Vector2>(poly.Length);
+            for (int i = 0; i < poly.Length; i++)
+            {
+                uvs.Add(poly[i].isOriginalVertex ? (poly[i].originalVertexId == ctx.v0 ? ctx.uv0 : (poly[i].originalVertexId == ctx.v1 ? ctx.uv1 : ctx.uv2)) : EdgeCrossingTrimRouter.GetLocalCrossingUv(ctx, poly[i].crossing));
+            }
+            float area = Mathf.Abs(ComputePolygonSignedAreaUvs(uvs));
+            float ratio = srcArea > 0f ? area / srcArea : 0f;
+            Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} polygonAttempt p={p} c0=edge{c0.edgeIndex}({c0.edgeStart}-{c0.edgeEnd}) t={c0.t:F6} before={(c0.isBeforeInside?1:0)} uv={c0Uv} c1=edge{c1.edgeIndex}({c1.edgeStart}-{c1.edgeEnd}) t={c1.t:F6} before={(c1.isBeforeInside?1:0)} uv={c1Uv} polyUvs=[{string.Join(";", uvs)}] polyArea={area} srcArea={srcArea} areaRatio={ratio} failReason={failReason} failDetail={failDetail}");
+        }
+    }
+
+    private static float ComputePolygonSignedAreaUvs(List<Vector2> uvs)
+    {
+        float a = 0f;
+        for (int i = 0; i < uvs.Count; i++)
+        {
+            Vector2 p = uvs[i];
+            Vector2 q = uvs[(i + 1) % uvs.Count];
+            a += p.x * q.y - q.x * p.y;
+        }
+        return a * 0.5f;
+    }
+
+    private static string FormatUvList6(List<Vector2> uvs)
+    {
+        if (uvs == null) return "";
+        var items = new List<string>(uvs.Count);
+        for (int i = 0; i < uvs.Count; i++) items.Add($"({uvs[i].x:F6},{uvs[i].y:F6})");
+        return string.Join(";", items);
+    }
+
+    private static string FormatAdjacentDistances(List<Vector2> uvs)
+    {
+        if (uvs == null || uvs.Count == 0) return "";
+        var items = new List<string>(uvs.Count);
+        for (int i = 0; i < uvs.Count; i++)
+        {
+            int j = (i + 1) % uvs.Count;
+            items.Add($"{i}-{j}:{Vector2.Distance(uvs[i], uvs[j]):F8}");
+        }
+        return string.Join(",", items);
+    }
+
+    private static void LogOneLineMajorityBreakdown(int triId, AlphaMaskProcessor.AlphaMaskData maskData, EdgeCrossingTrimRouter.TriangleContext ctx, int insideCount)
+    {
+        bool v0 = AlphaMaskProcessor.SampleMask(maskData, ctx.uv0);
+        bool v1 = AlphaMaskProcessor.SampleMask(maskData, ctx.uv1);
+        bool v2 = AlphaMaskProcessor.SampleMask(maskData, ctx.uv2);
+        Vector2 m01 = (ctx.uv0 + ctx.uv1) * 0.5f;
+        Vector2 m12 = (ctx.uv1 + ctx.uv2) * 0.5f;
+        Vector2 m20 = (ctx.uv2 + ctx.uv0) * 0.5f;
+        Vector2 c = (ctx.uv0 + ctx.uv1 + ctx.uv2) / 3f;
+        bool s01 = AlphaMaskProcessor.SampleMask(maskData, m01);
+        bool s12 = AlphaMaskProcessor.SampleMask(maskData, m12);
+        bool s20 = AlphaMaskProcessor.SampleMask(maskData, m20);
+        bool sc = AlphaMaskProcessor.SampleMask(maskData, c);
+        Debug.Log($"[NDMF VRoid Mesh Trimmer][OneLineDebug] tri={triId} majority7 v0={(v0?1:0)} v1={(v1?1:0)} v2={(v2?1:0)} m01={(s01?1:0)} m12={(s12?1:0)} m20={(s20?1:0)} centroid={(sc?1:0)} insideCount={insideCount} result={(insideCount>=4?"WholeKeep":"WholeTrim")}");
+    }
+
     private static void EmitMajority7PointTriangle(
         AlphaMaskProcessor.AlphaMaskData maskData,
         NDMFVRoidMeshTrimmer trimmer,
@@ -697,20 +935,21 @@ public static class MeshTrimProcessor
         List<Vector3> vertices,
         List<Vector2> uv,
         List<int> dstIndices,
-        ref TrimStats stats)
+        ref TrimStats stats,
+        out int insideCount)
     {
         Vector2 uv0 = uv[i0];
         Vector2 uv1 = uv[i1];
         Vector2 uv2 = uv[i2];
-        int inside = 0;
-        if (AlphaMaskProcessor.SampleMask(maskData, uv0)) inside++;
-        if (AlphaMaskProcessor.SampleMask(maskData, uv1)) inside++;
-        if (AlphaMaskProcessor.SampleMask(maskData, uv2)) inside++;
-        if (AlphaMaskProcessor.SampleMask(maskData, (uv0 + uv1) * 0.5f)) inside++;
-        if (AlphaMaskProcessor.SampleMask(maskData, (uv1 + uv2) * 0.5f)) inside++;
-        if (AlphaMaskProcessor.SampleMask(maskData, (uv2 + uv0) * 0.5f)) inside++;
-        if (AlphaMaskProcessor.SampleMask(maskData, (uv0 + uv1 + uv2) / 3f)) inside++;
-        if (inside >= 4) AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
+        insideCount = 0;
+        if (AlphaMaskProcessor.SampleMask(maskData, uv0)) insideCount++;
+        if (AlphaMaskProcessor.SampleMask(maskData, uv1)) insideCount++;
+        if (AlphaMaskProcessor.SampleMask(maskData, uv2)) insideCount++;
+        if (AlphaMaskProcessor.SampleMask(maskData, (uv0 + uv1) * 0.5f)) insideCount++;
+        if (AlphaMaskProcessor.SampleMask(maskData, (uv1 + uv2) * 0.5f)) insideCount++;
+        if (AlphaMaskProcessor.SampleMask(maskData, (uv2 + uv0) * 0.5f)) insideCount++;
+        if (AlphaMaskProcessor.SampleMask(maskData, (uv0 + uv1 + uv2) / 3f)) insideCount++;
+        if (insideCount >= 4) AddTriangle(dstIndices, i0, i1, i2, vertices, uv, trimmer, ref stats);
         else stats.removedTriangles++;
     }
 
@@ -732,9 +971,9 @@ public static class MeshTrimProcessor
             hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
         int cutB = GetOrCreateCrossingVertex(result.splitCrossingB, crossingVertexCache, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
             hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats);
-        if (!IsChordLengthValid(i0, i1, i2, cutA, cutB, uv, trimmer)) { failReason = "chord_too_short"; return false; }
+        if (!IsChordLengthValid(i0, i1, i2, cutA, cutB, uv, trimmer)) { failReason = "area_too_small"; return false; }
 
-        if (result.keptInsideVertices == null || result.keptInsideVertices.Length == 0) { failReason = "empty_kept_inside_vertices"; return false; }
+        if (result.keptInsideVertices == null || result.keptInsideVertices.Length == 0) { failReason = "no_kept_inside_vertices"; return false; }
         var staged = new List<(int a, int b, int c)>();
         if (result.keptInsideVertices.Length == 1)
         {
@@ -742,7 +981,7 @@ public static class MeshTrimProcessor
             int b = cutA;
             int c = cutB;
             GetTrianglePreserveWinding(i0, i1, i2, ref a, ref b, ref c, vertices);
-            if (!IsTriangleValidForEmit(a, b, c, vertices, uv, trimmer)) { failReason = "single_triangle_invalid"; return false; }
+            if (!IsTriangleValidForEmit(a, b, c, vertices, uv, trimmer)) { failReason = "world_area_too_small"; return false; }
             staged.Add((a, b, c));
             CommitStagedTriangles(staged, dstIndices, ref stats);
             return true;
@@ -754,17 +993,17 @@ public static class MeshTrimProcessor
             int b = result.keptInsideVertices[1];
             int t0a = a, t0b = b, t0c = cutA;
             GetTrianglePreserveWinding(i0, i1, i2, ref t0a, ref t0b, ref t0c, vertices);
-            if (!IsTriangleValidForEmit(t0a, t0b, t0c, vertices, uv, trimmer)) { failReason = "split_triangle0_invalid"; return false; }
+            if (!IsTriangleValidForEmit(t0a, t0b, t0c, vertices, uv, trimmer)) { failReason = "winding_failed"; return false; }
             staged.Add((t0a, t0b, t0c));
             int t1a = b, t1b = cutB, t1c = cutA;
             GetTrianglePreserveWinding(i0, i1, i2, ref t1a, ref t1b, ref t1c, vertices);
-            if (!IsTriangleValidForEmit(t1a, t1b, t1c, vertices, uv, trimmer)) { failReason = "split_triangle1_invalid"; return false; }
+            if (!IsTriangleValidForEmit(t1a, t1b, t1c, vertices, uv, trimmer)) { failReason = "duplicate_vertex"; return false; }
             staged.Add((t1a, t1b, t1c));
             CommitStagedTriangles(staged, dstIndices, ref stats);
-            return true;
+            return staged.Count > 0;
         }
 
-        failReason = "unsupported_kept_inside_vertex_count";
+        failReason = "emitted_zero_triangles";
         return false;
     }
 
@@ -813,11 +1052,15 @@ public static class MeshTrimProcessor
         Dictionary<(int, int, float), int> crossingVertexCache,
         List<int> dstIndices,
         ref TrimStats stats,
-        out string failReason)
+        out string failReason,
+        out string failDetail)
     {
         failReason = "none";
+        failDetail = "none";
         if (result.insidePolygons == null || result.insidePolygons.Length == 0) { failReason = "empty_inside_polygons"; return false; }
         var staged = new List<(int a, int b, int c)>();
+        float srcAreaForFan = Mathf.Abs((uv[i1].x - uv[i0].x) * (uv[i2].y - uv[i0].y) - (uv[i2].x - uv[i0].x) * (uv[i1].y - uv[i0].y)) * 0.5f;
+        const float fanTriangleMinAreaRatio = 0.0002f;
         for (int p = 0; p < result.insidePolygons.Length; p++)
         {
             var poly = result.insidePolygons[p];
@@ -830,8 +1073,22 @@ public static class MeshTrimProcessor
                 else indices.Add(GetOrCreateCrossingVertex(v.crossing, crossingVertexCache, trimmer, vertices, normals, tangents, uv, uv2, uv3, uv4, colors, boneWeights,
                     hasNormals, hasTangents, hasUv2, hasUv3, hasUv4, hasColors, hasBoneWeights, vertexSources, ref stats));
             }
-            if (!ValidateInsideLoop(indices, i0, i1, i2, uv, trimmer))
+            var before = new List<Vector2>(indices.Count);
+            for (int i = 0; i < indices.Count; i++) before.Add(uv[indices[i]]);
+            SimplifyPolygonIndices(indices, uv, out int removedAdjacent, out int removedCollinear);
+            var after = new List<Vector2>(indices.Count);
+            for (int i = 0; i < indices.Count; i++) after.Add(uv[indices[i]]);
+            if (trimmer != null && trimmer.debugEdgeCrossingRoutes)
             {
+                float srcAreaDbg = Mathf.Abs((uv[i1].x - uv[i0].x) * (uv[i2].y - uv[i0].y) - (uv[i2].x - uv[i0].x) * (uv[i1].y - uv[i0].y)) * 0.5f;
+                float polyAreaDbg = Mathf.Abs(ComputePolygonSignedArea(indices, uv));
+                float ratioDbg = srcAreaDbg > 0f ? polyAreaDbg / srcAreaDbg : 0f;
+                Debug.Log($"[NDMF VRoid Mesh Trimmer][PolySimplify] route={result.route} poly={p} emitBeforeSimplify=[{FormatUvList6(before)}] emitAfterSimplify=[{FormatUvList6(after)}] emitRemovedAdjacentDuplicateCount={removedAdjacent} emitRemovedCollinearCount={removedCollinear} areaRatioAfter={ratioDbg:F8} adjacentDistance=[{FormatAdjacentDistances(after)}] duplicateEpsilon={Mathf.Sqrt(LoopDuplicateUvEpsilonSqr):F8}");
+            }
+            if (indices.Count < 3) { failReason = "polygon_too_small_after_simplify"; failDetail = $"poly={p} polyBeforeSimplify=[{string.Join(";", before)}] polyAfterSimplify=[{string.Join(";", after)}] removedAdjacentDuplicateCount={removedAdjacent} removedCollinearCount={removedCollinear}"; return false; }
+            if (!ValidateInsideLoop(indices, i0, i1, i2, uv, trimmer, out failDetail))
+            {
+                failDetail = $"{failDetail} polyBeforeSimplify=[{string.Join(";", before)}] polyAfterSimplify=[{string.Join(";", after)}] removedAdjacentDuplicateCount={removedAdjacent} removedCollinearCount={removedCollinear} validationPolygon=[{string.Join(";", after)}]";
                 failReason = "loop_validation_failed";
                 return false;
             }
@@ -846,8 +1103,11 @@ public static class MeshTrimProcessor
                 int a = indices[0];
                 int b = indices[k];
                 int c = indices[k + 1];
+                float fanUvArea = Mathf.Abs((uv[b].x - uv[a].x) * (uv[c].y - uv[a].y) - (uv[c].x - uv[a].x) * (uv[b].y - uv[a].y)) * 0.5f;
                 GetTrianglePreserveWinding(i0, i1, i2, ref a, ref b, ref c, vertices);
-                if (!IsTriangleValidForEmit(a, b, c, vertices, uv, trimmer)) { failReason = "fan_triangle_invalid"; return false; }
+                float fanAreaRatio = srcAreaForFan > 0f ? fanUvArea / srcAreaForFan : 0f;
+                float fanMinArea = srcAreaForFan * fanTriangleMinAreaRatio;
+                if (!IsFanTriangleValidForEmit(a, b, c, vertices, uv, fanUvArea, fanMinArea)) { failDetail = $"{failDetail} polygonAreaRatio={(srcAreaForFan>0f?Mathf.Abs(ComputePolygonSignedArea(indices, uv))/srcAreaForFan:0f):F8} fanTriangleIndex={k} fanUvArea={fanUvArea:F8} fanTriangleAreaRatio={fanAreaRatio:F8} fanTriangleMinAreaRatio={fanTriangleMinAreaRatio:F8} fanTriangleMinAreaThreshold={fanMinArea:F8} finalPolygon=[{FormatUvList6(after)}] fanTriangleUv=[{FormatUvList6(new List<Vector2>{uv[indices[0]],uv[indices[k]],uv[indices[k+1]]})}] adjacentDistance=[{FormatAdjacentDistances(after)}] duplicateEpsilon={Mathf.Sqrt(LoopDuplicateUvEpsilonSqr):F8}"; failReason = "fan_triangle_invalid"; return false; }
                 staged.Add((a, b, c));
             }
         }
@@ -856,27 +1116,75 @@ public static class MeshTrimProcessor
         return true;
     }
 
-    private static bool ValidateInsideLoop(List<int> indices, int i0, int i1, int i2, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer)
+    private static void SimplifyPolygonIndices(List<int> indices, List<Vector2> uv, out int removedAdjacent, out int removedCollinear)
     {
-        if (indices == null || indices.Count < 3) return false;
+        removedAdjacent = 0;
+        removedCollinear = 0;
+        float eps = Mathf.Sqrt(LoopDuplicateUvEpsilonSqr);
+        if (indices == null) return;
+
+        bool changed = true;
+        while (changed && indices.Count >= 3)
+        {
+            changed = false;
+            for (int i = 0; i < indices.Count; i++)
+            {
+                int j = (i + 1) % indices.Count;
+                if ((uv[indices[i]] - uv[indices[j]]).sqrMagnitude <= eps * eps)
+                {
+                    indices.RemoveAt(j);
+                    removedAdjacent++;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+
+        changed = true;
+        while (changed && indices.Count >= 3)
+        {
+            changed = false;
+            for (int i = 0; i < indices.Count; i++)
+            {
+                int prev = (i - 1 + indices.Count) % indices.Count;
+                int next = (i + 1) % indices.Count;
+                Vector2 a = uv[indices[prev]];
+                Vector2 b = uv[indices[i]];
+                Vector2 c = uv[indices[next]];
+                float area2 = Mathf.Abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y));
+                if (area2 <= eps)
+                {
+                    indices.RemoveAt(i);
+                    removedCollinear++;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    private static bool ValidateInsideLoop(List<int> indices, int i0, int i1, int i2, List<Vector2> uv, NDMFVRoidMeshTrimmer trimmer, out string failDetail)
+    {
+        failDetail = "none";
+        if (indices == null || indices.Count < 3) { failDetail = "polygon_too_small"; return false; }
         var seen = new HashSet<int>();
         for (int i = 0; i < indices.Count; i++)
         {
-            if (!seen.Add(indices[i])) return false;
+            if (!seen.Add(indices[i])) { failDetail = $"duplicate_vertex:index={indices[i]}"; return false; }
             Vector2 p = uv[indices[i]];
             Vector2 q = uv[indices[(i + 1) % indices.Count]];
-            if ((p - q).sqrMagnitude < LoopDuplicateUvEpsilonSqr) return false;
+            if ((p - q).sqrMagnitude < LoopDuplicateUvEpsilonSqr) { failDetail = $"adjacent_duplicate_uv:i={i}"; return false; }
             for (int j = i + 1; j < indices.Count; j++)
             {
-                if ((p - uv[indices[j]]).sqrMagnitude < LoopDuplicateUvEpsilonSqr) return false;
+                if ((p - uv[indices[j]]).sqrMagnitude < LoopDuplicateUvEpsilonSqr) { failDetail = $"duplicate_uv:i={i},j={j}"; return false; }
             }
         }
         float srcArea = Mathf.Abs((uv[i1].x - uv[i0].x) * (uv[i2].y - uv[i0].y) - (uv[i2].x - uv[i0].x) * (uv[i1].y - uv[i0].y)) * 0.5f;
         float polyArea = Mathf.Abs(ComputePolygonSignedArea(indices, uv));
-        if (polyArea <= 0f) return false;
+        if (polyArea <= 0f) { failDetail = "poly_area_non_positive"; return false; }
         float minAreaRatio = trimmer != null ? Mathf.Clamp(trimmer.edgeCrossingMinPolygonAreaRatio, 0.0001f, 1f) : DefaultMinPolygonAreaRatio;
-        if (srcArea > 0f && polyArea < srcArea * minAreaRatio) return false;
-        if (HasSelfIntersection(indices, uv)) return false;
+        if (srcArea > 0f && polyArea < srcArea * minAreaRatio) { failDetail = $"poly_area_too_small:poly={polyArea},src={srcArea},minRatio={minAreaRatio}"; return false; }
+        if (HasSelfIntersection(indices, uv)) { failDetail = "self_intersection"; return false; }
         return true;
     }
 
@@ -950,6 +1258,15 @@ public static class MeshTrimProcessor
         if (uvArea < trimmer.minTriangleUvArea) return false;
         float worldArea = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).magnitude * 0.5f;
         if (worldArea < trimmer.minTriangleWorldArea) return false;
+        return true;
+    }
+
+    private static bool IsFanTriangleValidForEmit(int a, int b, int c, List<Vector3> vertices, List<Vector2> uv, float fanUvArea, float fanMinArea)
+    {
+        if (a == b || b == c || c == a) return false;
+        if (fanUvArea <= fanMinArea) return false;
+        float worldArea = Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]).magnitude * 0.5f;
+        if (worldArea <= 1e-12f) return false;
         return true;
     }
 

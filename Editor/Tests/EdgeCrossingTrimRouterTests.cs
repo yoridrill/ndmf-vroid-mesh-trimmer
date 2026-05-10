@@ -206,7 +206,7 @@ public class EdgeCrossingTrimRouterTests
             }
         };
         var active = new List<EdgeCrossingTrimRouter.LocalCrossing>(edgeInfos[0].crossings);
-        bool ok = EdgeCrossingTrimRouter.TryBuildInsideBoundarySegments(ctx, edgeInfos, active, out var _, out var reason);
+        bool ok = EdgeCrossingTrimRouter.TryBuildInsideBoundarySegments(ctx, edgeInfos, active, null, out var _, out var reason);
         Assert.IsFalse(ok);
         StringAssert.Contains("isBeforeInside_mismatch", reason);
     }
@@ -242,6 +242,7 @@ public class EdgeCrossingTrimRouterTests
         bool ok = EdgeCrossingTrimRouter.TryExtractInsideLoops(
             ctx,
             boundary,
+            null,
             new EdgeCrossingTrimRouter.Chord(c1, c2),
             new EdgeCrossingTrimRouter.Chord(c3, c0),
             out var loops,
@@ -266,6 +267,7 @@ public class EdgeCrossingTrimRouterTests
         bool ok = EdgeCrossingTrimRouter.TryExtractInsideLoops(
             ctx,
             boundary,
+            null,
             new EdgeCrossingTrimRouter.Chord(c1, c2),
             new EdgeCrossingTrimRouter.Chord(c3, c0),
             out var _,
@@ -290,6 +292,7 @@ public class EdgeCrossingTrimRouterTests
         bool ok = EdgeCrossingTrimRouter.TryExtractInsideLoops(
             ctx,
             boundary,
+            null,
             new EdgeCrossingTrimRouter.Chord(c2, c3),
             new EdgeCrossingTrimRouter.Chord(c1, c0),
             out var _,

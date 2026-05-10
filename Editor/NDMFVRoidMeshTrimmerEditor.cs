@@ -80,9 +80,8 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         EditorGUILayout.LabelField(T("基本設定", "Basic Settings"), EditorStyles.boldLabel);
         DrawSetting("alphaThreshold");
         DrawSetting("maskDilatePixels");
-        DrawSetting("maskClosePixels");
-        DrawSetting("fillSmallHolesPixels");
-        DrawSetting("removeSmallIslandsPixels");
+        DrawSetting("maskCleanupPixels");
+        DrawSetting("minimumFragmentSizePermille");
         bool oldPadding = trimmer.enableTexturePadding;
         EditorGUILayout.PropertyField(serializedObject.FindProperty("enableTexturePadding"), new GUIContent(T("テクスチャの余白を塗り足す", "Pad Texture Transparent Areas")));
 
@@ -161,21 +160,6 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         EditorGUILayout.PropertyField(
             serializedObject.FindProperty("debugEdgeCrossingRoutes"),
             new GUIContent(T("Verbose Log", "Verbose Log")));
-        EditorGUILayout.PropertyField(
-            serializedObject.FindProperty("edgeCrossingMergeEpsilon"),
-            new GUIContent(T("交点マージしきい値", "Crossing Merge Epsilon")));
-        EditorGUILayout.PropertyField(
-            serializedObject.FindProperty("edgeCrossingEndpointSnapEpsilon"),
-            new GUIContent(T("端点スナップしきい値", "Endpoint Snap Epsilon")));
-        EditorGUILayout.PropertyField(
-            serializedObject.FindProperty("edgeCrossingCacheQuantizeStep"),
-            new GUIContent(T("交点キャッシュ量子化", "Crossing Cache Quantize Step")));
-        EditorGUILayout.PropertyField(
-            serializedObject.FindProperty("edgeCrossingMinPolygonAreaRatio"),
-            new GUIContent(T("最小ポリゴン面積比", "Min Polygon Area Ratio")));
-        EditorGUILayout.PropertyField(
-            serializedObject.FindProperty("edgeCrossingMinChordLengthRatio"),
-            new GUIContent(T("最小Chord長比", "Min Chord Length Ratio")));
         EditorGUILayout.HelpBox(T("Preview復旧用: 元参照へ戻します。", "Preview recovery: restore original renderer references."), MessageType.None);
         if (GUILayout.Button(T("Restore Originals", "Restore Originals")))
         {
@@ -270,10 +254,9 @@ public class NDMFVRoidMeshTrimmerEditor : Editor
         switch (name)
         {
             case "alphaThreshold": return T("アルファしきい値", "Alpha Threshold");
-            case "maskDilatePixels": return T("ベース拡張 (px)", "Base Expansion (px)");
-            case "maskClosePixels": return T("細い隙間を無視 (px)", "Ignore Thin Gaps (px)");
-            case "fillSmallHolesPixels": return T("透明穴下限サイズ (px)", "Min Transparent Hole Size (px)");
-            case "removeSmallIslandsPixels": return T("ゴミ判定サイズ (px)", "Noise Threshold Size (px)");
+            case "maskDilatePixels": return T("マスク拡張 (px)", "Mask Expansion (px)");
+            case "maskCleanupPixels": return T("マスククリーンアップ (px)", "Mask Cleanup (px)");
+            case "minimumFragmentSizePermille": return T("微小ポリゴン除去 (‰)", "Minimum Fragment Size (‰)");
             case "minIntersectionT": return T("最小交点t", "Min Intersection t");
             case "maxIntersectionT": return T("最大交点t", "Max Intersection t");
             case "minTriangleUvArea": return T("最小UV三角形面積", "Min Triangle UV Area");
